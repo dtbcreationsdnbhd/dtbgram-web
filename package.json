@@ -1,8 +1,8 @@
 {
-  "name": "telegram-t",
+  "name": "dtbgram",
   "version": "12.0.39",
   "description": "",
-  "author": "Alexander Zinchuk (alexander@zinchuk.com)",
+  "author": "DTB (info@dtb.dev)",
   "license": "GPL-3.0-or-later",
   "type": "module",
   "main": "index.js",

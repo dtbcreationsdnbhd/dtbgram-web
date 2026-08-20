@@ -78,7 +78,7 @@ export default defineConfig(({ mode }): UserConfig => {
   } = env;
   const appEnv = env.APP_ENV || (mode === 'development' ? 'development' : 'production');
   const appMockedClient = env.APP_MOCKED_CLIENT || '';
-  const defaultAppTitle = `Telegram${appEnv !== 'production' ? ' Beta' : ''}`;
+  const defaultAppTitle = `DTBgram${appEnv !== 'production' ? ' Staging' : ''}`;
   const baseUrl = env.BASE_URL || PRODUCTION_URL;
   const appTitle = env.APP_TITLE || defaultAppTitle;
   const isProductionApp = appEnv === 'production';
