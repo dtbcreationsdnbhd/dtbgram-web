@@ -149,7 +149,8 @@ export function buildApiUser(mtpUser: GramJs.TypeUser): ApiUser | undefined {
     // Other users' usernames are hidden in this client; `hasUsername` still reflects the real state
     usernames: mtpUser.self ? usernames : undefined,
     hasUsername,
-    phoneNumber: mtpUser.phone || '',
+    // Other users' phone numbers are hidden in this client
+    phoneNumber: mtpUser.self ? (mtpUser.phone || '') : '',
     noStatus: !mtpUser.status,
     ...(mtpUser.accessHash && { accessHash: String(mtpUser.accessHash) }),
     avatarPhotoId,

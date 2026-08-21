@@ -215,6 +215,7 @@ export default defineConfig(({ mode }): UserConfig => {
       host: '0.0.0.0',
       port: 1234,
       strictPort: true,
+      allowedHosts: ['.ngrok-free.dev', '.ngrok-free.app'],
       headers: {
         'Content-Security-Policy': csp,
         'Service-Worker-Allowed': '/',

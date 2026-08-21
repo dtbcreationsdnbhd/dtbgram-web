@@ -900,11 +900,15 @@ export function updater(update: Update) {
     });
   } else if (update instanceof GramJs.UpdateUserPhone) {
     const { userId, phone } = update;
+    const apiUserId = buildApiPeerId(userId, 'user');
+
+    // Other users' phone numbers are hidden in this client
+    const phoneNumber = localDb.users[apiUserId]?.self ? phone : '';
 
     sendApiUpdate({
       '@type': 'updateUser',
-      id: buildApiPeerId(userId, 'user'),
-      user: { phoneNumber: phone },
+      id: apiUserId,
+      user: { phoneNumber },
     });
   } else if (update instanceof GramJs.UpdatePeerSettings) {
     const { peer, settings } = update;
