@@ -887,7 +887,8 @@ export function updater(update: Update) {
       ? pick(update, [])
       : pick(update, ['firstName', 'lastName']);
 
-    const usernames = buildApiUsernames(update);
+    // Other users' usernames are hidden in this client
+    const usernames = updatedUser?.self ? buildApiUsernames(update) : undefined;
 
     sendApiUpdate({
       '@type': 'updateUser',

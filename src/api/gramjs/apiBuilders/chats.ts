@@ -103,7 +103,8 @@ function buildApiChatFieldsFromPeerEntity(
     isLinkedInDiscussion: channel?.hasLink,
     areSignaturesShown: channel?.signatures,
     areProfilesShown: channel?.signatureProfiles,
-    usernames,
+    // Other users' usernames are hidden in this client; group and channel usernames stay visible
+    usernames: user && !user.self ? undefined : usernames,
     accessHash,
     hasVideoAvatar,
     avatarPhotoId,

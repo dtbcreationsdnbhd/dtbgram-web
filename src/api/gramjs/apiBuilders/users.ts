@@ -146,7 +146,8 @@ export function buildApiUser(mtpUser: GramJs.TypeUser): ApiUser | undefined {
     hasMainMiniApp: Boolean(mtpUser.botHasMainApp),
     canEditBot: botCanEdit,
     ...(userType === 'userTypeBot' && { canBeInvitedToGroup: !mtpUser.botNochats }),
-    usernames,
+    // Other users' usernames are hidden in this client; `hasUsername` still reflects the real state
+    usernames: mtpUser.self ? usernames : undefined,
     hasUsername,
     phoneNumber: mtpUser.phone || '',
     noStatus: !mtpUser.status,
