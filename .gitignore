@@ -1,6 +1,7 @@
 dist/build-stats.json
 node_modules
 .cache
+.archive/
 .env
 src/lib/gramjs/build/
 build-contest/

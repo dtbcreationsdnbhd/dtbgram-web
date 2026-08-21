@@ -20,6 +20,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "telegraph:update_changelog": "node ./dev/telegraphChangelog.js",
+    "archive:serve": "node ./dev/internalArchiveServer.js",
     "check:ts": "tsc && eslint --cache --cache-location .cache/.eslintcache",
     "check:css": "stylelint \"**/*.{css,scss}\" --cache --cache-location .cache/.stylelintcache",
     "fix:ts": "tsc && eslint --cache --cache-location .cache/.eslintcache --fix",

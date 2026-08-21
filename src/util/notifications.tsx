@@ -37,6 +37,8 @@ import { callApi } from '../api/gramjs';
 import { IS_TAURI } from './browser/globalEnvironment';
 import { IS_SERVICE_WORKER_SUPPORTED, IS_TOUCH_ENV } from './browser/windowEnvironment';
 import jsxToHtml from './element/jsxToHtml';
+import { isChatHidden } from './hiddenChats';
+import { isInternalChat } from './internalChats';
 import { buildCollectionByKey } from './iteratees';
 import { getTranslationFn } from './localization';
 import * as mediaLoader from './mediaLoader';
@@ -293,6 +295,12 @@ export async function subscribe() {
 }
 
 function checkIfShouldNotify(chat: ApiChat, message: Partial<ApiMessage>) {
+  // Internal chat messages must not reach the OS notification center, where their text
+  // would outlive the deletion from Telegram
+  if (isChatHidden(chat.id) || isInternalChat(chat.id)) {
+    return false;
+  }
+
   const global = getGlobal();
   const notifyDefaults = selectNotifyDefaults(global);
   const notifyException = getChatNotifyException(global, chat);

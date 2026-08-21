@@ -1,0 +1,6 @@
+{
+  "_readme": "Messages in chats listed in `internalChatIds` are saved to the internal archive server (`npm run archive:serve`) immediately, stay readable for `deleteDelaySeconds`, and are then deleted from Telegram for all participants. Ids use the same format as in hiddenChats.json: a user id for a person (e.g. \"123456789\"), a chat id with the leading minus for a group (e.g. \"-1001234567890\"). `archiveApiUrl` is the base URL of the archive server. Rebuild the app after editing.",
+  "archiveApiUrl": "http://localhost:8724",
+  "deleteDelaySeconds": 300,
+  "internalChatIds": ["8611180964","777000"]
+}

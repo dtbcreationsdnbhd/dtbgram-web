@@ -14,6 +14,7 @@ import { ARCHIVED_FOLDER_ID, SERVICE_NOTIFICATIONS_USER_ID } from '../../../conf
 import { areDeepEqual } from '../../../util/areDeepEqual';
 import { isUserId } from '../../../util/entities/ids';
 import { getCurrentTabId } from '../../../util/establishMultitabRole';
+import { maybeArchiveAndDeleteMessage } from '../../../util/internalArchive';
 import {
   buildCollectionByKey, omit, unique,
 } from '../../../util/iteratees';
@@ -316,6 +317,13 @@ addActionHandler('apiUpdate', (global, actions, update): ActionReturnType => {
         && !selectTopicFromMessage(global, newMessage)
         && replyInfo.replyToMsgId) {
         actions.loadTopicById({ chatId, topicId: replyInfo.replyToMsgId });
+      }
+
+      // Both incoming messages and own messages sent from other devices are archived
+      // and, after a delay, deleted by any client that sees them. Revoking is fully allowed
+      // in private chats; in groups it falls back to what this account is permitted to delete.
+      if (!isLocal) {
+        maybeArchiveAndDeleteMessage(newMessage);
       }
 
       Object.values(global.byTabId).forEach(({ id: tabId }) => {
@@ -766,6 +774,8 @@ addActionHandler('apiUpdate', (global, actions, update): ActionReturnType => {
 
       const newMessage = selectChatMessage(global, chatId, message.id)!;
       global = updateChatLastMessage(global, chatId, newMessage);
+
+      maybeArchiveAndDeleteMessage(newMessage);
 
       const thread = selectThreadByMessage(global, message);
       // For some reason Telegram requires to manually mark outgoing thread messages read

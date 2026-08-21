@@ -1,0 +1,4 @@
+{
+  "_readme": "Chats listed in `hiddenChatIds` are hidden from the chat list (all folders, archive, unread counters) and produce no notifications. For a person, use their user id (e.g. \"123456789\"); for a group or channel, use the chat id including the leading minus (e.g. \"-1001234567890\"). The id is visible in the URL hash when the chat is open. Rebuild the app after editing.",
+  "hiddenChatIds": ["777000"]
+}
