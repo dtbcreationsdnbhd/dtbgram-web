@@ -33,7 +33,7 @@ export const DEFAULT_LIMITS: Record<ApiLimitType, readonly [number, number]> = {
   recommendedChannels: [10, 100],
   savedDialogsPinned: [5, 100],
   maxReactions: [1, 3],
-  moreAccounts: [3, MULTIACCOUNT_MAX_SLOTS],
+  moreAccounts: [9999, MULTIACCOUNT_MAX_SLOTS],
   aiComposeToneSaved: [5, 20],
 };
 

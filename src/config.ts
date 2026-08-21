@@ -47,7 +47,7 @@ export const DEBUG_PAYMENT_SMART_GLOCAL = false;
 export const SESSION_LEGACY_USER_KEY = 'user_auth';
 export const SESSION_ACCOUNT_PREFIX = 'account';
 
-export const MULTIACCOUNT_MAX_SLOTS = 6;
+export const MULTIACCOUNT_MAX_SLOTS = 9999;
 export const GLOBAL_STATE_CACHE_DISABLED = false;
 export const GLOBAL_STATE_CACHE_PREFIX = 'tt-global-state';
 export const SHARED_STATE_CACHE_KEY = 'tt-shared-state';
