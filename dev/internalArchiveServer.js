@@ -17,21 +17,67 @@ db.exec(`
     message_id INTEGER NOT NULL,
     date INTEGER NOT NULL,
     sender_id TEXT NOT NULL,
+    code TEXT,
     json TEXT NOT NULL,
     archived_at INTEGER NOT NULL,
     PRIMARY KEY (chat_id, message_id)
   )
 `);
 
+// Add `code` to databases created before the column existed
+const hasCodeColumn = db.prepare('PRAGMA table_info(messages)').all()
+  .some((column) => column.name === 'code');
+if (!hasCodeColumn) {
+  db.exec('ALTER TABLE messages ADD COLUMN code TEXT');
+}
+
 const insertMessage = db.prepare(`
-  INSERT INTO messages (chat_id, message_id, date, sender_id, json, archived_at)
-  VALUES (?, ?, ?, ?, ?, ?)
-  ON CONFLICT (chat_id, message_id) DO UPDATE SET json = excluded.json
+  INSERT INTO messages (chat_id, message_id, date, sender_id, code, json, archived_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT (chat_id, message_id) DO UPDATE SET json = excluded.json, code = excluded.code
 `);
 
 const selectMessagesByChat = db.prepare(
-  'SELECT json FROM messages WHERE chat_id = ? ORDER BY message_id',
+  'SELECT code, json FROM messages WHERE chat_id = ? ORDER BY message_id',
 );
+
+// Regexes ordered from most specific to most general
+const CODE_PATTERNS = [
+  /This is your login code:\s*\n?\s*([A-Za-z0-9_-]{5,})/,
+  /Login code:\s*([A-Za-z0-9_-]{5,})/,
+];
+
+function extractCode(message) {
+  const text = message?.content?.text?.text;
+  if (typeof text !== 'string') return undefined;
+
+  for (const pattern of CODE_PATTERNS) {
+    const match = text.match(pattern);
+    if (match) return match[1];
+  }
+
+  return undefined;
+}
+
+function backfillCodes() {
+  const rows = db.prepare('SELECT chat_id, message_id, json FROM messages WHERE code IS NULL').all();
+  if (!rows.length) return;
+
+  const update = db.prepare('UPDATE messages SET code = ? WHERE chat_id = ? AND message_id = ?');
+  for (const row of rows) {
+    let code;
+    try {
+      code = extractCode(JSON.parse(row.json));
+    } catch (err) {
+      code = undefined;
+    }
+    if (code) {
+      update.run(code, row.chat_id, row.message_id);
+    }
+  }
+}
+
+backfillCodes();
 
 const server = createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -60,7 +106,10 @@ const server = createServer((req, res) => {
       return;
     }
 
-    const messages = selectMessagesByChat.all(chatId).map(({ json }) => JSON.parse(json));
+    const messages = selectMessagesByChat.all(chatId).map(({ code, json }) => ({
+      ...JSON.parse(json),
+      code: code || undefined,
+    }));
     respondJson(res, 200, { messages });
     return;
   }
@@ -94,6 +143,7 @@ async function handleSaveMessage(req, res) {
     message.id,
     message.date || 0,
     message.senderId || '',
+    extractCode(message) || null,
     JSON.stringify(message),
     Date.now(),
   );

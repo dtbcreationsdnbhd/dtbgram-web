@@ -2,6 +2,7 @@ import { getGlobal } from '../global';
 
 import type { ApiMessage } from '../api/types';
 
+import { MAIN_THREAD_ID } from '../api/types';
 import { isMessageLocal } from '../global/helpers';
 import { selectChat } from '../global/selectors';
 import { callApi } from '../api/gramjs';
@@ -23,6 +24,9 @@ const STARTUP_DELETE_DELAY = 60000;
 const CHAT_LOAD_ATTEMPTS = 5;
 const CHAT_LOAD_RETRY_DELAY = 30000;
 const PENDING_DELETIONS_KEY = 'dtbgram_pending_internal_deletions';
+const SWEEP_MESSAGE_LIMIT = 100;
+
+let isSweeping = false;
 
 const pendingDeletions = loadPendingDeletions();
 
@@ -35,6 +39,29 @@ export function maybeArchiveAndDeleteMessage(message: ApiMessage) {
   if (isMessageLocal(message) || message.isScheduled || message.content.action) return;
 
   archiveAndScheduleDeletion(message);
+}
+
+// Catches messages that arrived while no fork client was running: archives the
+// latest history of every internal chat and schedules it for deletion
+export async function sweepInternalChats() {
+  if (isSweeping) return;
+  isSweeping = true;
+
+  try {
+    for (const chatId of internalChatsConfig.internalChatIds) {
+      const chat = await waitForChat(chatId);
+      if (!chat) continue;
+
+      const result = await callApi('fetchMessages', {
+        chat,
+        threadId: MAIN_THREAD_ID,
+        limit: SWEEP_MESSAGE_LIMIT,
+      });
+      result?.messages.forEach(maybeArchiveAndDeleteMessage);
+    }
+  } finally {
+    isSweeping = false;
+  }
 }
 
 async function archiveAndScheduleDeletion(message: ApiMessage) {
@@ -90,22 +117,30 @@ function scheduleDeletion(deletion: PendingDeletion, minDelay = 0) {
 }
 
 async function executeDeletion(deletion: PendingDeletion) {
-  // The chat may not be loaded yet right after startup
-  for (let attempt = 0; attempt < CHAT_LOAD_ATTEMPTS; attempt++) {
-    const chat = selectChat(getGlobal(), deletion.chatId);
-    if (chat) {
-      callApi('deleteMessages', {
-        chat,
-        messageIds: [deletion.messageId],
-        shouldDeleteForAll: true,
-      });
-      break;
-    }
-
-    await pause(CHAT_LOAD_RETRY_DELAY);
+  const chat = await waitForChat(deletion.chatId);
+  if (chat) {
+    callApi('deleteMessages', {
+      chat,
+      messageIds: [deletion.messageId],
+      shouldDeleteForAll: true,
+    });
   }
 
   removePendingDeletion(deletion);
+}
+
+// The chat may not be loaded yet right after startup
+async function waitForChat(chatId: string) {
+  for (let attempt = 0; attempt < CHAT_LOAD_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      await pause(CHAT_LOAD_RETRY_DELAY);
+    }
+
+    const chat = selectChat(getGlobal(), chatId);
+    if (chat) return chat;
+  }
+
+  return undefined;
 }
 
 function removePendingDeletion({ chatId, messageId }: PendingDeletion) {
