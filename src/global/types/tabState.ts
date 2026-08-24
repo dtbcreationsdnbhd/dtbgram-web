@@ -533,6 +533,10 @@ export type TabState = {
   notifications: ApiNotification[];
   dialogs: ApiDialog[];
 
+  fileDownloadWarningModal?: {
+    chatId: string;
+    messageId: number;
+  };
   safeLinkModalUrl?: string;
   mapModal?: {
     point: ApiGeoPoint;

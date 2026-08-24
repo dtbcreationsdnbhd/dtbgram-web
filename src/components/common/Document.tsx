@@ -13,7 +13,6 @@ import {
   getMediaTransferState,
   isDocumentVideo,
 } from '../../global/helpers';
-import { isIpRevealingMedia } from '../../util/media/ipRevealingMedia';
 import { getDocumentExtension, getDocumentHasPreview } from './helpers/documentInfo';
 import { preloadDocumentMedia } from './helpers/preloadDocumentMedia';
 
@@ -21,11 +20,9 @@ import useFlag from '../../hooks/useFlag';
 import { useIsIntersecting } from '../../hooks/useIntersectionObserver';
 import useLastCallback from '../../hooks/useLastCallback';
 import useMediaWithLoadProgress from '../../hooks/useMediaWithLoadProgress';
-import useOldLang from '../../hooks/useOldLang';
 
-import Checkbox from '../ui/Checkbox';
-import ConfirmDialog from '../ui/ConfirmDialog';
 import File from './File';
+import FileDownloadWarningModal from './FileDownloadWarningModal';
 
 type OwnProps = {
   document: ApiDocument;
@@ -77,15 +74,13 @@ const Document = ({
   onDateClick,
   contextActions,
 }: OwnProps) => {
-  const { cancelMediaDownload, downloadMedia, setSharedSettingOption } = getActions();
+  const { cancelMediaDownload, downloadMedia } = getActions();
 
   const ref = useRef<HTMLDivElement>();
 
-  const oldLang = useOldLang();
-  const [isFileIpDialogOpen, openFileIpDialog, closeFileIpDialog] = useFlag();
-  const [shouldNotWarnAboutFiles, setShouldNotWarnAboutFiles] = useState(false);
+  const [isFileWarningOpen, openFileWarning, closeFileWarning] = useFlag();
 
-  const { fileName, size, mimeType } = document;
+  const { fileName, size } = document;
   const extension = getDocumentExtension(document) || '';
 
   const isIntersecting = useIsIntersecting(ref, observeIntersection);
@@ -143,8 +138,8 @@ const Document = ({
     };
   }, [withMediaViewer, message]);
 
-  const handleDownload = useLastCallback(() => {
-    downloadMedia({ media: document, originMessage: message });
+  const handleDownload = useLastCallback((shouldSkipWarning?: boolean) => {
+    downloadMedia({ media: document, originMessage: message, shouldSkipWarning });
   });
 
   const handleClick = useLastCallback(() => {
@@ -174,18 +169,17 @@ const Document = ({
       return;
     }
 
-    if (isIpRevealingMedia({ mimeType, extension }) && shouldWarnAboutFiles) {
-      openFileIpDialog();
+    if (shouldWarnAboutFiles) {
+      openFileWarning();
       return;
     }
 
     handleDownload();
   });
 
-  const handleFileIpConfirm = useLastCallback(() => {
-    setSharedSettingOption({ shouldWarnAboutFiles: !shouldNotWarnAboutFiles });
-    closeFileIpDialog();
-    handleDownload();
+  const handleFileWarningConfirm = useLastCallback(() => {
+    closeFileWarning();
+    handleDownload(true);
   });
 
   const handleDateClick = useLastCallback(() => {
@@ -216,19 +210,11 @@ const Document = ({
         onClick={handleClick}
         onDateClick={onDateClick ? handleDateClick : undefined}
       />
-      <ConfirmDialog
-        isOpen={isFileIpDialogOpen}
-        onClose={closeFileIpDialog}
-        confirmHandler={handleFileIpConfirm}
-      >
-        {oldLang('lng_launch_svg_warning')}
-        <Checkbox
-          className="dialog-checkbox"
-          checked={shouldNotWarnAboutFiles}
-          label={oldLang('lng_launch_exe_dont_ask')}
-          onCheck={setShouldNotWarnAboutFiles}
-        />
-      </ConfirmDialog>
+      <FileDownloadWarningModal
+        isOpen={isFileWarningOpen}
+        onClose={closeFileWarning}
+        onConfirm={handleFileWarningConfirm}
+      />
     </>
   );
 };

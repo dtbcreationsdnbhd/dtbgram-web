@@ -56,6 +56,7 @@ import {
   selectViewportIds,
 } from '../../selectors';
 import { selectMessageDownloadableMedia } from '../../selectors/media';
+import { selectSharedSettings } from '../../selectors/sharedState';
 import { selectDraft, selectReplyStack, selectThreadInfo } from '../../selectors/threads';
 import { getPeerStarsForMessage } from '../api/messages';
 
@@ -661,7 +662,24 @@ addActionHandler('cancelMediaHashDownloads', (global, actions, payload): ActionR
 });
 
 addActionHandler('downloadMedia', (global, actions, payload): ActionReturnType => {
-  const { media, originMessage, tabId = getCurrentTabId() } = payload;
+  const {
+    media, originMessage, shouldSkipWarning, tabId = getCurrentTabId(),
+  } = payload;
+
+  const shouldWarnAboutFiles = selectSharedSettings(global).shouldWarnAboutFiles;
+  if (
+    !shouldSkipWarning
+    && shouldWarnAboutFiles
+    && originMessage
+    && media.mediaType === 'document'
+  ) {
+    return updateTabState(global, {
+      fileDownloadWarningModal: {
+        chatId: originMessage.chatId,
+        messageId: originMessage.id,
+      },
+    }, tabId);
+  }
 
   const hash = getMediaHash(media, 'download');
   if (!hash) return undefined;
@@ -678,8 +696,10 @@ addActionHandler('downloadMedia', (global, actions, payload): ActionReturnType =
   return addActiveMediaDownload(global, hash, metadata, tabId);
 });
 
+addTabStateResetterAction('closeFileDownloadWarningModal', 'fileDownloadWarningModal');
+
 addActionHandler('downloadSelectedMessages', (global, actions, payload): ActionReturnType => {
-  const { tabId = getCurrentTabId() } = payload || {};
+  const { shouldSkipWarning, tabId = getCurrentTabId() } = payload;
   const tabState = selectTabState(global, tabId);
   if (!tabState.selectedMessages) {
     return;
@@ -695,7 +715,9 @@ addActionHandler('downloadSelectedMessages', (global, actions, payload): ActionR
   messages.forEach((message) => {
     const media = selectMessageDownloadableMedia(global, message);
     if (!media) return;
-    actions.downloadMedia({ media, originMessage: message, tabId });
+    actions.downloadMedia({
+      media, originMessage: message, shouldSkipWarning, tabId,
+    });
   });
 });
 

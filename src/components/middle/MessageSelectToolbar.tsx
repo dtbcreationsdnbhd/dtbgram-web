@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from '../../lib/teact/teact';
+import { memo, useEffect } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
 import type { ApiChat } from '../../api/types';
@@ -11,8 +11,8 @@ import {
   selectCanDownloadSelectedMessages,
   selectCanForwardMessages,
   selectCanReportSelectedMessages, selectCurrentChat,
-  selectCurrentMessageList, selectHasIpRevealingMedia,
-  selectHasProtectedMessage,
+  selectCurrentMessageList, selectHasProtectedMessage,
+  selectHasSuspiciousFile,
   selectSelectedMessagesCount,
   selectTabState,
 } from '../../global/selectors';
@@ -28,10 +28,9 @@ import useOldLang from '../../hooks/useOldLang';
 import usePreviousDeprecated from '../../hooks/usePreviousDeprecated';
 import useCopySelectedMessages from './hooks/useCopySelectedMessages';
 
+import FileDownloadWarningModal from '../common/FileDownloadWarningModal';
 import Icon from '../common/icons/Icon';
 import Button from '../ui/Button';
-import Checkbox from '../ui/Checkbox';
-import ConfirmDialog from '../ui/ConfirmDialog';
 
 import './MessageSelectToolbar.scss';
 
@@ -54,7 +53,7 @@ type StateProps = {
   selectedMessageIds?: number[];
   reportContext?: NonNullable<TabState['selectedMessages']>['reportContext'];
   shouldWarnAboutFiles?: boolean;
-  hasIpRevealingMedia?: boolean;
+  hasSuspiciousFile?: boolean;
 };
 
 const MessageSelectToolbar = ({
@@ -73,7 +72,7 @@ const MessageSelectToolbar = ({
   selectedMessageIds,
   reportContext,
   shouldWarnAboutFiles,
-  hasIpRevealingMedia,
+  hasSuspiciousFile,
 }: OwnProps & StateProps) => {
   const {
     exitMessageSelectMode,
@@ -82,15 +81,13 @@ const MessageSelectToolbar = ({
     copySelectedMessages,
     reportMessages,
     openDeleteMessageModal,
-    setSharedSettingOption,
   } = getActions();
   const lang = useLang();
   const oldLang = useOldLang();
 
   useCopySelectedMessages(Boolean(isActive && !reportContext));
 
-  const [isFileIpDialogOpen, openFileIpDialog, closeFileIpDialog] = useFlag();
-  const [shouldNotWarnAboutFiles, setShouldNotWarnAboutFiles] = useState(false);
+  const [isFileWarningOpen, openFileWarning, closeFileWarning] = useFlag();
 
   const handleExitMessageSelectMode = useLastCallback(() => {
     exitMessageSelectMode();
@@ -123,24 +120,23 @@ const MessageSelectToolbar = ({
     exitMessageSelectMode();
   });
 
-  const handleDownload = useLastCallback(() => {
-    downloadSelectedMessages();
+  const handleDownload = useLastCallback((shouldSkipWarning?: boolean) => {
+    downloadSelectedMessages({ shouldSkipWarning });
     exitMessageSelectMode();
   });
 
   const handleMessageDownload = useLastCallback(() => {
-    if (shouldWarnAboutFiles && hasIpRevealingMedia) {
-      openFileIpDialog();
+    if (shouldWarnAboutFiles && hasSuspiciousFile) {
+      openFileWarning();
       return;
     }
 
     handleDownload();
   });
 
-  const handleFileIpConfirm = useLastCallback(() => {
-    setSharedSettingOption({ shouldWarnAboutFiles: !shouldNotWarnAboutFiles });
-    closeFileIpDialog();
-    handleDownload();
+  const handleFileWarningConfirm = useLastCallback(() => {
+    closeFileWarning();
+    handleDownload(true);
   });
 
   const prevSelectedMessagesCount = usePreviousDeprecated(selectedMessagesCount || undefined, true);
@@ -271,19 +267,11 @@ const MessageSelectToolbar = ({
           )}
         </div>
       </div>
-      <ConfirmDialog
-        isOpen={isFileIpDialogOpen}
-        onClose={closeFileIpDialog}
-        confirmHandler={handleFileIpConfirm}
-      >
-        {oldLang('lng_launch_svg_warning')}
-        <Checkbox
-          className="dialog-checkbox"
-          checked={shouldNotWarnAboutFiles}
-          label={oldLang('lng_launch_exe_dont_ask')}
-          onCheck={setShouldNotWarnAboutFiles}
-        />
-      </ConfirmDialog>
+      <FileDownloadWarningModal
+        isOpen={isFileWarningOpen}
+        onClose={closeFileWarning}
+        onConfirm={handleFileWarningConfirm}
+      />
     </>
   );
 };
@@ -302,8 +290,8 @@ export default memo(withGlobal<OwnProps>(
     const { messageIds: selectedMessageIds, reportContext } = tabState.selectedMessages || {};
     const hasProtectedMessage = chatId ? selectHasProtectedMessage(global, chatId, selectedMessageIds) : false;
     const canForward = !isSchedule && chatId ? selectCanForwardMessages(global, chatId, selectedMessageIds) : false;
-    const hasIpRevealingMedia = selectedMessageIds && chatId
-      ? selectHasIpRevealingMedia(global, chatId, selectedMessageIds) : false;
+    const hasSuspiciousFile = selectedMessageIds && chatId
+      ? selectHasSuspiciousFile(global, chatId, selectedMessageIds) : false;
     const isShareMessageModalOpen = tabState.isShareMessageModalShown;
     const isAnyModalOpen = Boolean(isShareMessageModalOpen || tabState.requestedDraft
       || tabState.requestedAttachBotInChat || tabState.requestedAttachBotInstall || tabState.reportModal
@@ -322,7 +310,7 @@ export default memo(withGlobal<OwnProps>(
       hasProtectedMessage,
       isAnyModalOpen,
       shouldWarnAboutFiles,
-      hasIpRevealingMedia,
+      hasSuspiciousFile,
     };
   },
 )(MessageSelectToolbar));

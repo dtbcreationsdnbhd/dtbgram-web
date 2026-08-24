@@ -2000,6 +2000,9 @@
 "BotDownloadFileTitle" = "Download File";
 "BotDownloadFileDescription" = "**{bot}** offers you to download **{filename}**";
 "BotDownloadFileButton" = "Download";
+"FileDownloadWarningTitle" = "Potentially Unsafe File";
+"FileDownloadWarningText" = "This file type may be unsafe. Download anyway?";
+"FileDownloadWarningConfirm" = "Download";
 "PrivacyGifts" = "Gifts";
 "PrivacyGiftsTitle" = "Who can display gifts on my profile?";
 "PrivacyGiftsInfo" = "Choose whether gifts from specific senders need your approval before they're visible to others on your profile.";

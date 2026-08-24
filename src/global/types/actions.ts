@@ -1958,11 +1958,15 @@ export interface ActionPayloads {
   toggleMusicInProfile: { audio: ApiAudio } & WithTabId;
 
   // Downloads
-  downloadSelectedMessages: WithTabId | undefined;
+  downloadSelectedMessages: {
+    shouldSkipWarning?: boolean;
+  } & WithTabId;
   downloadMedia: {
     media: DownloadableMedia;
     originMessage?: ApiMessage;
+    shouldSkipWarning?: boolean;
   } & WithTabId;
+  closeFileDownloadWarningModal: WithTabId | undefined;
   cancelMediaDownload: {
     media: DownloadableMedia;
   } & WithTabId;
