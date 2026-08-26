@@ -1,4 +1,6 @@
 import { APP_NAME, DEBUG, DEBUG_MORE } from '../config';
+import { isChatHidden } from '../util/hiddenChats';
+import { isInternalChat } from '../util/internalChats';
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -181,6 +183,8 @@ export function handlePush(e: PushEvent) {
   if (!data || data.mute === Boolean.True) return;
 
   const notification = getNotificationData(data);
+
+  if (notification.chatId && (isChatHidden(notification.chatId) || isInternalChat(notification.chatId))) return;
 
   // Don't show already triggered notification
   if (shownNotifications.has(notification.messageId)) {

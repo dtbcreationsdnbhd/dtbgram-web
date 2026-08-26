@@ -10,6 +10,7 @@ import { timestampPlusDay } from '../../../util/dates/oldDateFormat';
 import { isDeepLink, tryParseDeepLink } from '../../../util/deepLinkParser';
 import { toChannelId } from '../../../util/entities/ids';
 import { getCurrentTabId } from '../../../util/establishMultitabRole';
+import { isChatHidden } from '../../../util/hiddenChats';
 import { getTranslationFn } from '../../../util/localization';
 import { formatStarsAsText } from '../../../util/localization/format';
 import { throttle } from '../../../util/schedulers';
@@ -57,11 +58,11 @@ addActionHandler('setGlobalSearchQuery', (global, actions, payload): ActionRetur
       global = updateGlobalSearchFetchingStatus(global, { chats: false }, tabId);
       global = updateGlobalSearch(global, {
         localResults: {
-          peerIds: accountResultIds,
+          peerIds: accountResultIds.filter((id) => !isChatHidden(id)),
         },
         globalResults: {
           ...selectTabState(global, tabId).globalSearch.globalResults,
-          peerIds: globalResultIds,
+          peerIds: globalResultIds.filter((id) => !isChatHidden(id)),
         },
         sponsoredPeer: sponsoredResult,
       }, tabId);
@@ -300,8 +301,11 @@ async function searchMessagesGlobal<T extends GlobalState>(global: T, params: {
   }
 
   const {
-    messages, userStatusesById, totalCount, nextOffsetRate, nextOffsetId, nextOffsetPeerId,
+    userStatusesById, totalCount, nextOffsetRate, nextOffsetId, nextOffsetPeerId,
   } = result;
+
+  // Messages from hidden chats are excluded from search results
+  const messages = result.messages.filter((message) => !isChatHidden(message.chatId));
 
   const searchFlood = result.searchFlood || previousSearchFlood;
 

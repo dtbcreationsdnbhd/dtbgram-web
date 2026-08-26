@@ -8,6 +8,7 @@ import { MAIN_THREAD_ID } from '../../../api/types';
 import { DEBUG, MESSAGE_LIST_SLICE, SERVICE_NOTIFICATIONS_USER_ID } from '../../../config';
 import { getCurrentTabId } from '../../../util/establishMultitabRole';
 import { init as initFolderManager } from '../../../util/folderManager';
+import { sweepInternalChats } from '../../../util/internalArchive';
 import {
   buildCollectionByKey, omitUndefined, pick, pickTruthy, unique,
 } from '../../../util/iteratees';
@@ -99,6 +100,7 @@ addActionHandler('sync', (global, actions): ActionReturnType => {
 
       loadAllChats({ listType: 'archived' });
       preloadTopChatMessages();
+      sweepInternalChats();
     },
   });
 });

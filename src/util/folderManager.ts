@@ -25,6 +25,7 @@ import {
 import { selectDraft, selectThreadReadState } from '../global/selectors/threads';
 import { areRecordsShallowEqual } from './areShallowEqual';
 import { createCallbackManager } from './callbacks';
+import { isChatHidden } from './hiddenChats';
 import { areSortedArraysEqual, unique } from './iteratees';
 import { throttle } from './schedulers';
 
@@ -650,7 +651,7 @@ function buildChatSummary<T extends GlobalState>(
     type,
     isListedInAll: Boolean(
       !isRestricted && !isNotJoined && !migratedTo && !shouldHideServiceChat && !isRemovedFromAll
-      && !(isCommunity && !isCollapsedInDialogs),
+      && !(isCommunity && !isCollapsedInDialogs) && !isChatHidden(id),
     ),
     isListedInSaved: !isRemovedFromSaved,
     isHiddenByCollapsedCommunity,

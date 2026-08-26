@@ -1,9 +1,10 @@
 import {
   memo,
-  useCallback, useEffect,
+  useCallback, useEffect, useMemo,
 } from '../../../lib/teact/teact';
 import { getActions, withGlobal } from '../../../global';
 
+import { isChatHidden } from '../../../util/hiddenChats';
 import { throttle } from '../../../util/schedulers';
 
 import ListTopPeers from '../../common/ListTopPeers';
@@ -55,16 +56,22 @@ const RecentContacts = ({
     clearRecentlyFoundChats();
   }, [clearRecentlyFoundChats]);
 
+  const visibleTopPeerIds = useMemo(() => topPeerIds?.filter((id) => !isChatHidden(id)), [topPeerIds]);
+  const visibleRecentlyFoundChatIds = useMemo(
+    () => recentlyFoundChatIds?.filter((id) => !isChatHidden(id)),
+    [recentlyFoundChatIds],
+  );
+
   return (
     <div className="RecentContacts custom-scroll">
-      {topPeerIds?.length ? (
+      {visibleTopPeerIds?.length ? (
         <Island className="search-island island-recent-contacts">
-          <ListTopPeers peerIds={topPeerIds} onPeerClick={handleClick} />
+          <ListTopPeers peerIds={visibleTopPeerIds} onPeerClick={handleClick} />
         </Island>
       ) : undefined}
-      {recentlyFoundChatIds && (
+      {visibleRecentlyFoundChatIds && (
         <RecentContactsList
-          chatIds={recentlyFoundChatIds}
+          chatIds={visibleRecentlyFoundChatIds}
           noTopBorder={!topPeerIds?.length}
           onChatClick={handleClick}
           onClear={handleClearRecentlyFoundChats}

@@ -16,6 +16,7 @@ import { filterPeersByQuery } from '../../../global/helpers/peers';
 import { selectSimilarChannelIds, selectTabState } from '../../../global/selectors';
 import buildClassName from '../../../util/buildClassName';
 import { getOrderedIds } from '../../../util/folderManager';
+import { isChatHidden } from '../../../util/hiddenChats';
 import { unique } from '../../../util/iteratees';
 import { parseSearchResultKey, type SearchResultKey } from '../../../util/keys/searchResultKey';
 import { MEMO_EMPTY_ARRAY } from '../../../util/memo';
@@ -238,7 +239,7 @@ const ChatResults: FC<OwnProps & StateProps> = ({
     const contactIdsWithMe = [
       ...(currentUserId ? [currentUserId] : []),
       ...(contactIds || []),
-    ];
+    ].filter((id) => !isChatHidden(id));
 
     const localContactIds = filterPeersByQuery({
       ids: contactIdsWithMe, query: searchQuery, type: 'user',
