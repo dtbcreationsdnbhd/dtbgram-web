@@ -1594,6 +1594,9 @@ export interface LangPair {
   'BotSuggestedStatusUpdated': undefined;
   'BotDownloadFileTitle': undefined;
   'BotDownloadFileButton': undefined;
+  'FileDownloadWarningTitle': undefined;
+  'FileDownloadWarningText': undefined;
+  'FileDownloadWarningConfirm': undefined;
   'PrivacyGifts': undefined;
   'PrivacyGiftsTitle': undefined;
   'PrivacyGiftsInfo': undefined;

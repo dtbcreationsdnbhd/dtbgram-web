@@ -33,10 +33,8 @@ import { isUserId } from '../../util/entities/ids';
 import { getCurrentTabId } from '../../util/establishMultitabRole';
 import { getMessageKey, isLocalMessageId } from '../../util/keys/messageKey';
 import { parseTranslationCacheKey } from '../../util/keys/translationKey';
-import { isIpRevealingMedia } from '../../util/media/ipRevealingMedia';
 import { MEMO_EMPTY_ARRAY } from '../../util/memo';
 import { getServerTime } from '../../util/serverTime';
-import { getDocumentExtension } from '../../components/common/helpers/documentInfo';
 import { API_GENERAL_ID_LIMIT } from '../../limits';
 import {
   canSendReaction,
@@ -1256,7 +1254,7 @@ export function selectCanForwardMessages<T extends GlobalState>(global: T, chatI
     .every((message) => message && selectCanForwardMessage(global, message));
 }
 
-export function selectHasIpRevealingMedia<T extends GlobalState>(global: T, chatId: string, messageIds: number[]) {
+export function selectHasSuspiciousFile<T extends GlobalState>(global: T, chatId: string, messageIds: number[]) {
   const messages = selectChatMessages(global, chatId);
 
   return messageIds
@@ -1264,13 +1262,7 @@ export function selectHasIpRevealingMedia<T extends GlobalState>(global: T, chat
     .some((message) => {
       if (!message) return false;
 
-      const document = getMessageDocument(message);
-      if (!document) return false;
-
-      const extension = getDocumentExtension(document);
-      if (!extension) return false;
-
-      return isIpRevealingMedia({ mimeType: document.mimeType, extension });
+      return Boolean(getMessageDocument(message));
     });
 }
 

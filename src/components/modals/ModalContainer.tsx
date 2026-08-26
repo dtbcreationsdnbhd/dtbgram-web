@@ -28,6 +28,7 @@ import DeleteAccountModal from './deleteAccount/DeleteAccountModal.async';
 import DeleteMemberModal from './deleteMember/DeleteMemberModal.async';
 import DisableSharingAboutModal from './disableSharing/DisableSharingAboutModal.async';
 import EmojiStatusAccessModal from './emojiStatusAccess/EmojiStatusAccessModal.async';
+import FileDownloadWarningModal from './fileDownloadWarning/FileDownloadWarningModal';
 import FrozenAccountModal from './frozenAccount/FrozenAccountModal.async';
 import AboutStarGiftModal from './gift/AboutStarGiftModal.async';
 import ActiveGiftAuctionsModal from './gift/auction/ActiveGiftAuctionsModal.async';
@@ -165,6 +166,7 @@ type ModalKey = keyof Pick<TabState,
   'isCocoonModalOpen' |
   'editRankModal' |
   'rankModal' |
+  'fileDownloadWarningModal' |
   'aiTonePreviewModal'
 >;
 type WrappedModalKey = 'pollModal' | 'mapModal' | 'safeLinkModalUrl';
@@ -304,6 +306,7 @@ const LEGACY_MODALS: LegacyModalRegistry = {
   isCocoonModalOpen: CocoonModal,
   editRankModal: EditRankModal,
   rankModal: RankModal,
+  fileDownloadWarningModal: FileDownloadWarningModal,
   aiTonePreviewModal: AiTonePreviewModal,
 };
 const WRAPPED_MODALS: WrappedModalRegistry = {
