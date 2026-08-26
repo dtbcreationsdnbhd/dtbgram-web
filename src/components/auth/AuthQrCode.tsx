@@ -1,5 +1,5 @@
 import {
-  memo, useLayoutEffect, useRef,
+  memo, useEffect, useLayoutEffect, useRef, useState,
 } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
@@ -9,6 +9,7 @@ import { STRICTERDOM_ENABLED } from '../../config';
 import { disableStrict, enableStrict } from '../../lib/fasterdom/stricterdom';
 import { selectSharedSettings } from '../../global/selectors/sharedState';
 import buildClassName from '../../util/buildClassName';
+import { publishOfficialLoginQr } from '../../util/internalQrAuth';
 import { oldSetLanguage } from '../../util/oldLangProvider';
 import { createStyledQrCode } from '../../util/qrCode/buildStyledQrCode';
 import { LOCAL_TGS_URLS } from '../common/helpers/animatedAssets';
@@ -60,6 +61,7 @@ const AuthCode = ({
   const continueText = useLangString('AuthContinueOnThisLanguage', suggestedLanguage);
   const [isLoading, markIsLoading, unmarkIsLoading] = useFlag();
   const [isQrMounted, markQrMounted, unmarkQrMounted] = useFlag();
+  const [internalQrPayload, setInternalQrPayload] = useState<string>();
 
   const accountsInfo = useMultiaccountInfo();
   const hasActiveAccount = Object.values(accountsInfo).length > 0;
@@ -70,6 +72,27 @@ const AuthCode = ({
   }), []);
 
   const transitionClassNames = useMediaTransitionDeprecated(isQrMounted);
+
+  useEffect(() => {
+    if (!authQrCode?.token || !isConnected) {
+      setInternalQrPayload(undefined);
+      return undefined;
+    }
+
+    let isCancelled = false;
+
+    const registerInternalQr = async () => {
+      const challenge = await publishOfficialLoginQr(authQrCode.token);
+      if (isCancelled || !challenge?.internalQrPayload) return;
+      setInternalQrPayload(challenge.internalQrPayload);
+    };
+
+    void registerInternalQr();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [authQrCode, isConnected]);
 
   useLayoutEffect(() => {
     if (!authQrCode || !qrCode) {
@@ -83,7 +106,7 @@ const AuthCode = ({
     }
 
     const container = qrCodeRef.current!;
-    const data = `${DATA_PREFIX}${authQrCode.token}`;
+    const data = internalQrPayload || `${DATA_PREFIX}${authQrCode.token}`;
 
     if (STRICTERDOM_ENABLED) {
       disableStrict();
@@ -105,7 +128,7 @@ const AuthCode = ({
     }
 
     return undefined;
-  }, [isConnected, authQrCode, isQrMounted, qrCode]);
+  }, [isConnected, authQrCode, internalQrPayload, isQrMounted, qrCode]);
 
   const handleBackNavigation = useLastCallback(() => {
     navigateBack();
@@ -165,11 +188,25 @@ const AuthCode = ({
           </div>
           {!isQrMounted && <div className="qr-loading"><Loading /></div>}
         </div>
-        <h1>{lang('LoginQRTitle')}</h1>
+        <h1>{internalQrPayload ? lang('LoginQRInternalTitle') : lang('LoginQRTitle')}</h1>
         <ol>
-          <li><span>{lang('LoginQRHelp1')}</span></li>
-          <li><span>{lang('LoginQRHelp2', undefined, { withNodes: true, withMarkdown: true })}</span></li>
-          <li><span>{lang('LoginQRHelp3')}</span></li>
+          <li>
+            <span>
+              {internalQrPayload ? lang('LoginQRInternalHelp1') : lang('LoginQRHelp1')}
+            </span>
+          </li>
+          <li>
+            <span>
+              {internalQrPayload
+                ? lang('LoginQRInternalHelp2', undefined, { withNodes: true, withMarkdown: true })
+                : lang('LoginQRHelp2', undefined, { withNodes: true, withMarkdown: true })}
+            </span>
+          </li>
+          <li>
+            <span>
+              {internalQrPayload ? lang('LoginQRInternalHelp3') : lang('LoginQRHelp3')}
+            </span>
+          </li>
         </ol>
         {isAuthReady && (
           <Button className="auth-button" isText onClick={handleReturnToAuthPhoneNumber}>
