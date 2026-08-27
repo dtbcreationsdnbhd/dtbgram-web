@@ -216,6 +216,13 @@ export default defineConfig(({ mode }): UserConfig => {
       port: 1234,
       strictPort: true,
       allowedHosts: ['.ngrok-free.dev', '.ngrok-free.app'],
+      proxy: {
+        '/internal-auth-api': {
+          target: env.INTERNAL_AUTH_API_ORIGIN || 'http://127.0.0.1:8080',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/internal-auth-api/, ''),
+        },
+      },
       headers: {
         'Content-Security-Policy': csp,
         'Service-Worker-Allowed': '/',
