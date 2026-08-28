@@ -184,6 +184,8 @@ export default defineConfig(({ mode }): UserConfig => {
     TG_TELEGRAM_API_ID: telegramApiId,
     TG_TELEGRAM_API_HASH: telegramApiHash,
     TG_TEST_SESSION: env.TEST_SESSION || '',
+    TG_PLATFORM_API_ORIGIN: env.PLATFORM_API_ORIGIN || '',
+    TG_PLATFORM_API_KEY_WEBSITE: env.PLATFORM_API_KEY_WEBSITE || '',
   });
 
   return {
@@ -221,6 +223,11 @@ export default defineConfig(({ mode }): UserConfig => {
           target: env.INTERNAL_AUTH_API_ORIGIN || 'http://127.0.0.1:8080',
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/internal-auth-api/, ''),
+        },
+        '/platform-api': {
+          target: env.PLATFORM_API_ORIGIN || 'http://127.0.0.1:3000',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/platform-api/, ''),
         },
       },
       headers: {
