@@ -13,6 +13,7 @@ import useHistoryBack from '../../hooks/useHistoryBack';
 
 import Transition from '../ui/Transition';
 import AuthCode from './AuthCode.async';
+import AuthCompanyOtp from './AuthCompanyOtp.async';
 import AuthPassword from './AuthPassword.async';
 import AuthPhoneNumber from './AuthPhoneNumber';
 import AuthQrCode from './AuthQrCode';
@@ -22,10 +23,12 @@ import './Auth.scss';
 
 type StateProps = {
   authState: GlobalState['auth']['state'];
+  isCompanyOtpPending?: boolean;
 };
 
 const Auth = ({
   authState,
+  isCompanyOtpPending,
 }: StateProps) => {
   const {
     returnToAuthPhoneNumber, goToAuthQrCode,
@@ -54,6 +57,10 @@ const Auth = ({
   );
 
   function getScreen() {
+    if (isCompanyOtpPending) {
+      return <AuthCompanyOtp />;
+    }
+
     switch (renderingAuthState) {
       case 'authorizationStateWaitCode':
         return <AuthCode />;
@@ -71,6 +78,10 @@ const Auth = ({
   }
 
   function getActiveKey() {
+    if (isCompanyOtpPending) {
+      return 5;
+    }
+
     switch (renderingAuthState) {
       case 'authorizationStateWaitCode':
         return 0;
@@ -103,6 +114,7 @@ export default memo(withGlobal(
   (global): Complete<StateProps> => {
     return {
       authState: global.auth.state,
+      isCompanyOtpPending: global.auth.isCompanyOtpPending,
     };
   },
 )(Auth));

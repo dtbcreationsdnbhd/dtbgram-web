@@ -173,6 +173,9 @@ export type GlobalState = {
       expires: number;
     };
     passkeyOption?: ApiPasskeyOption;
+    isCompanyOtpRequired?: boolean;
+    isCompanyOtpPending?: boolean;
+    isCompanyOtpVerified?: boolean;
 
     hasWebAuthTokenFailed?: true;
     hasWebAuthTokenPasswordRequired?: true;

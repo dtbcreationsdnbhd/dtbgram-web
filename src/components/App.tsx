@@ -6,8 +6,8 @@ import type { ThemeKey } from '../types';
 import type { UiLoaderPage } from './common/UiLoader';
 
 import {
-  DARK_THEME_BG_COLOR, INACTIVE_MARKER, LIGHT_THEME_BG_COLOR, PAGE_TITLE, PAGE_TITLE_TAURI,
-} from '../config';
+  COMPANY_OTP_ENABLED,
+  DARK_THEME_BG_COLOR, INACTIVE_MARKER, LIGHT_THEME_BG_COLOR, PAGE_TITLE, PAGE_TITLE_TAURI } from '../config';
 import { forceMutation } from '../lib/fasterdom/stricterdom.ts';
 import {
   selectActionMessageBg, selectTabState, selectTheme, selectThemeValues,
@@ -15,6 +15,10 @@ import {
 import { IS_TAURI } from '../util/browser/globalEnvironment';
 import { IS_INSTALL_PROMPT_SUPPORTED, PLATFORM_ENV } from '../util/browser/windowEnvironment';
 import buildClassName from '../util/buildClassName';
+import {
+  getCompanyOtpPendingUserId,
+  isCompanyOtpVerified,
+} from '../util/companyOtpStorage';
 import { setupBeforeInstallPrompt } from '../util/installPrompt';
 import { ACCOUNT_SLOT, getAccountSlotUrl, getFirstLoggedInAccountSlot } from '../util/multiaccount';
 import { hasEncryptedSession } from '../util/passcode';
@@ -42,6 +46,7 @@ import styles from './App.module.scss';
 
 type StateProps = {
   authState: GlobalState['auth']['state'];
+  isCompanyOtpPending?: boolean;
   isScreenLocked?: boolean;
   hasPasscode?: boolean;
   inactiveReason?: 'auth' | 'otherClient';
@@ -65,6 +70,7 @@ const INACTIVE_PAGE_TITLE = `${ACTIVE_PAGE_TITLE} ${INACTIVE_MARKER}`;
 
 const App = ({
   authState,
+  isCompanyOtpPending,
   isScreenLocked,
   hasPasscode,
   inactiveReason,
@@ -165,10 +171,18 @@ const App = ({
       case 'authorizationStateClosing':
       case 'authorizationStateLoggingOut':
       case 'authorizationStateReady':
-        page = 'main';
-        activeKey = AppScreens.main;
+        if (isCompanyOtpPending) {
+          page = 'authCode';
+          activeKey = AppScreens.auth;
+        } else {
+          page = 'main';
+          activeKey = AppScreens.main;
+        }
         break;
     }
+  } else if (isCompanyOtpPending) {
+    page = 'authCode';
+    activeKey = AppScreens.auth;
   } else if (hasStoredSession()) {
     page = 'main';
     activeKey = AppScreens.main;
@@ -182,6 +196,7 @@ const App = ({
   if (activeKey !== AppScreens.lock
     && activeKey !== AppScreens.inactive
     && activeKey !== AppScreens.main
+    && !isCompanyOtpPending
     && parseInitialLocationHash()?.tgWebAuthToken
     && !hasWebAuthTokenFailed) {
     page = 'main';
@@ -269,12 +284,25 @@ const App = ({
 
 export default withGlobal(
   (global): Complete<StateProps> => {
-    const { state: authState, hasWebAuthTokenFailed, hasWebAuthTokenPasswordRequired } = global.auth;
+    const {
+      state: authState,
+      hasWebAuthTokenFailed,
+      hasWebAuthTokenPasswordRequired,
+      isCompanyOtpPending,
+    } = global.auth;
     const theme = selectTheme(global);
     const themeValues = selectThemeValues(global, theme);
+    const pendingUserId = getCompanyOtpPendingUserId();
+    const shouldRestoreCompanyOtp = Boolean(
+      COMPANY_OTP_ENABLED
+      && global.currentUserId
+      && pendingUserId === global.currentUserId
+      && !isCompanyOtpVerified(global.currentUserId),
+    );
 
     return {
       authState,
+      isCompanyOtpPending: isCompanyOtpPending || shouldRestoreCompanyOtp,
       isScreenLocked: global.passcode?.isScreenLocked,
       hasPasscode: global.passcode?.hasPasscode,
       inactiveReason: selectTabState(global).inactiveReason,

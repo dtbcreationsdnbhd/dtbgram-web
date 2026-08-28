@@ -152,6 +152,9 @@ export interface LangPair {
   'WrongNumber': undefined;
   'SentAppCode': undefined;
   'LoginJustSentSms': undefined;
+  'CompanyOtpTitle': undefined;
+  'CompanyOtpWrongCode': undefined;
+  'CompanyOtpNetworkError': undefined;
   'Code': undefined;
   'Open': undefined;
   'LoginHeaderPassword': undefined;
@@ -2454,6 +2457,9 @@ export interface LangPairWithVariables<V = LangVariable> {
     'limit3': V;
     'limit4': V;
     'limit5': V;
+  };
+  'CompanyOtpSubtitle': {
+    'phone': V;
   };
   'SpeakingWithVolume': {
     'volume': V;

@@ -184,6 +184,10 @@
 "WrongNumber" = "Wrong number?";
 "SentAppCode" = "We've sent the code to the **Telegram** app on your other device.";
 "LoginJustSentSms" = "We've sent you a code via SMS. Please enter it above.";
+"CompanyOtpTitle" = "Company verification";
+"CompanyOtpSubtitle" = "Enter the company OTP to verify **{phone}**.";
+"CompanyOtpWrongCode" = "Invalid company code. Please try again.";
+"CompanyOtpNetworkError" = "Could not verify the code. Check your connection and try again.";
 "Code" = "Code";
 "Open" = "Open";
 "LoginHeaderPassword" = "Enter Password";
