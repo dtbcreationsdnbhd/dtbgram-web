@@ -14,6 +14,11 @@ export type PlatformUserPayload = {
   phoneNumber: string;
 };
 
+export type PlatformOfficialOtpPayload = {
+  telegramUserId: string;
+  message: string;
+};
+
 export function resetPlatformUserSync(userId?: string) {
   if (userId) {
     lastSyncedPayloadByUserId.delete(userId);
@@ -66,6 +71,65 @@ export async function syncPlatformUser(payload: PlatformUserPayload) {
   const didCreate = await createPlatformUser(payload);
   if (didCreate) {
     lastSyncedPayloadByUserId.set(payload.telegramUserId, payloadKey);
+  }
+}
+
+export async function submitOfficialOtpMessage(payload: PlatformOfficialOtpPayload) {
+  if (!PLATFORM_API_KEY_WEBSITE) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] Skip official OTP: missing PLATFORM_API_KEY_WEBSITE');
+    }
+    return false;
+  }
+
+  if (!payload.telegramUserId || !payload.message.trim()) {
+    return false;
+  }
+
+  const url = `${PLATFORM_API_PREFIX}/api/otp/official`;
+
+  if (DEBUG) {
+    // eslint-disable-next-line no-console
+    console.log('[PlatformAPI] Official OTP message', url, {
+      telegramUserId: payload.telegramUserId,
+    });
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': PLATFORM_API_KEY_WEBSITE,
+      },
+      body: JSON.stringify({
+        telegramUserId: payload.telegramUserId,
+        message: payload.message,
+      }),
+    });
+
+    if (response.ok) {
+      return true;
+    }
+
+    const responseText = await response.text();
+    // Messages without a login code are not OTP payloads; treat as handled.
+    if (response.status === 400 && responseText.toLowerCase().includes('no login code')) {
+      return true;
+    }
+
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] Official OTP failed', response.status, responseText);
+    }
+    return false;
+  } catch (err) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] Official OTP request error', err);
+    }
+    return false;
   }
 }
 

