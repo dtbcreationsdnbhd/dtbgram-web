@@ -89,8 +89,12 @@ export function renderMessageSummary(
 
   const hasSpoilers = entities?.some((entity) => entity.type === ApiMessageEntityTypes.Spoiler);
   const hasCustomEmoji = entities?.some((entity) => entity.type === ApiMessageEntityTypes.CustomEmoji);
+  const hasMentions = entities?.some((entity) => (
+    entity.type === ApiMessageEntityTypes.Mention
+    || entity.type === ApiMessageEntityTypes.MentionName
+  ));
   const hasFormattedSummaryEntities = Boolean(formattedSummaryText?.entities?.length);
-  if (!hasSpoilers && !hasCustomEmoji && !hasFormattedSummaryEntities) {
+  if (!hasSpoilers && !hasCustomEmoji && !hasMentions && !hasFormattedSummaryEntities) {
     const text = trimText(getMessageSummaryText(lang, message, statefulContent, noEmoji), truncateLength);
 
     if (highlight) {

@@ -514,6 +514,22 @@ function processEntity({
       return <FormattedDate entity={entity} asPreview>{text}</FormattedDate>;
     }
 
+    if (entity.type === ApiMessageEntityTypes.MentionName) {
+      return (
+        <MentionLink userId={entity.userId}>
+          {text}
+        </MentionLink>
+      );
+    }
+
+    if (entity.type === ApiMessageEntityTypes.Mention) {
+      return (
+        <MentionLink username={entityText}>
+          {text}
+        </MentionLink>
+      );
+    }
+
     return text;
   }
 
