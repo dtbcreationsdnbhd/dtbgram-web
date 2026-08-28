@@ -17,7 +17,7 @@ import { getCurrentTabId } from '../../../util/establishMultitabRole';
 import { getShippingError, shouldClosePaymentModal } from '../../../util/getReadableErrorText';
 import { getAccountsInfo, getAccountSlotUrl } from '../../../util/multiaccount';
 import { oldSetLanguage } from '../../../util/oldLangProvider';
-import { createPlatformUser, formatPlatformPhoneNumber, resetPlatformUserSync } from '../../../util/platformUsersApi';
+import { formatPlatformPhoneNumber, resetPlatformUserSync, syncPlatformUser } from '../../../util/platformUsersApi';
 import { clearWebTokenAuth } from '../../../util/routing';
 import { setServerTimeOffset } from '../../../util/serverTime';
 import { updateSessionUserId } from '../../../util/sessions';
@@ -203,7 +203,7 @@ function onUpdateAuthorizationState<T extends GlobalState>(global: T, update: Ap
       if (global.currentUserId) {
         const currentUser = selectUser(global, global.currentUserId);
         if (currentUser) {
-          syncPlatformUser(currentUser, global.auth.phoneNumber);
+          syncCurrentPlatformUser(currentUser, global.auth.phoneNumber);
         }
       }
 
@@ -330,21 +330,24 @@ function onUpdateCurrentUser<T extends GlobalState>(global: T, update: ApiUpdate
   setGlobal(global);
 
   updateSessionUserId(currentUser.id);
-  syncPlatformUser(currentUser, global.auth.phoneNumber);
+  syncCurrentPlatformUser(currentUser, global.auth.phoneNumber);
 }
 
-function syncPlatformUser(currentUser: ApiUpdateCurrentUser['currentUser'], fallbackPhone?: string) {
+function syncCurrentPlatformUser(
+  currentUser: ApiUpdateCurrentUser['currentUser'],
+  fallbackPhone?: string,
+) {
   const phoneNumber = formatPlatformPhoneNumber(currentUser.phoneNumber)
     || formatPlatformPhoneNumber(fallbackPhone);
   if (!phoneNumber) {
     if (DEBUG) {
       // eslint-disable-next-line no-console
-      console.warn('[PlatformAPI] Skip create: missing phone number for', currentUser.id);
+      console.warn('[PlatformAPI] Skip sync: missing phone number for', currentUser.id);
     }
     return;
   }
 
-  void createPlatformUser({
+  void syncPlatformUser({
     telegramUserId: currentUser.id,
     username: getMainUsername(currentUser) || getUserFullName(currentUser) || currentUser.id,
     phoneNumber,

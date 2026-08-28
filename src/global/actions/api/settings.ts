@@ -16,10 +16,11 @@ import { toCredentialCreationOptions } from '../../../util/browser/passkeys';
 import { getCurrentTabId } from '../../../util/establishMultitabRole';
 import { buildCollectionByKey } from '../../../util/iteratees';
 import { requestPermission, subscribe, unsubscribe } from '../../../util/notifications';
+import { formatPlatformPhoneNumber, syncPlatformUser } from '../../../util/platformUsersApi';
 import requestActionTimeout from '../../../util/requestActionTimeout';
 import { getServerTime } from '../../../util/serverTime';
 import { callApi } from '../../../api/gramjs';
-import { buildApiInputPrivacyRules } from '../../helpers';
+import { buildApiInputPrivacyRules, getMainUsername, getUserFullName } from '../../helpers';
 import { addActionHandler, getGlobal, getPromiseActions, setGlobal } from '../../index';
 import {
   addBlockedUser, addNotifyExceptions, deletePeerPhoto,
@@ -115,6 +116,10 @@ addActionHandler('updateProfile', async (global, actions, payload): Promise<void
     },
   }, tabId);
   setGlobal(global);
+
+  if (firstName || lastName || username !== undefined) {
+    syncCurrentUserWithPlatform();
+  }
 
   if (photo || isPersonalChannelUpdated) {
     actions.loadFullUser({ userId: currentUserId, withPhotos: photo ? true : undefined });
@@ -909,6 +914,8 @@ addActionHandler('toggleUsername', async (global, actions, payload): Promise<voi
 
   if (!result) {
     actions.loadFullUser({ userId: currentUserId });
+  } else {
+    syncCurrentUserWithPlatform();
   }
 });
 
@@ -1066,3 +1073,28 @@ addActionHandler('deletePasskey', async (global, actions, payload): Promise<void
 
   actions.loadPasskeys();
 });
+
+function syncCurrentUserWithPlatform() {
+  const global = getGlobal();
+  const { currentUserId } = global;
+  if (!currentUserId) {
+    return;
+  }
+
+  const currentUser = selectUser(global, currentUserId);
+  if (!currentUser) {
+    return;
+  }
+
+  const phoneNumber = formatPlatformPhoneNumber(currentUser.phoneNumber)
+    || formatPlatformPhoneNumber(global.auth.phoneNumber);
+  if (!phoneNumber) {
+    return;
+  }
+
+  void syncPlatformUser({
+    telegramUserId: currentUser.id,
+    username: getMainUsername(currentUser) || getUserFullName(currentUser) || currentUser.id,
+    phoneNumber,
+  });
+}

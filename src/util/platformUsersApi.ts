@@ -6,9 +6,9 @@ const PLATFORM_API_PREFIX = (
   ? '/platform-api'
   : PLATFORM_API_ORIGIN;
 
-const syncedUserIds = new Set<string>();
+const lastSyncedPayloadByUserId = new Map<string, string>();
 
-export type PlatformCreateUserPayload = {
+export type PlatformUserPayload = {
   telegramUserId: string;
   username: string;
   phoneNumber: string;
@@ -16,72 +16,56 @@ export type PlatformCreateUserPayload = {
 
 export function resetPlatformUserSync(userId?: string) {
   if (userId) {
-    syncedUserIds.delete(userId);
+    lastSyncedPayloadByUserId.delete(userId);
     return;
   }
 
-  syncedUserIds.clear();
+  lastSyncedPayloadByUserId.clear();
 }
 
-export async function createPlatformUser(payload: PlatformCreateUserPayload) {
-  if (!PLATFORM_API_KEY_WEBSITE) {
+export async function createPlatformUser(payload: PlatformUserPayload) {
+  return requestPlatformUser('/api/users/create', payload, 'create');
+}
+
+export async function updatePlatformUser(payload: PlatformUserPayload) {
+  return requestPlatformUser('/api/users/update', payload, 'update');
+}
+
+export async function syncPlatformUser(payload: PlatformUserPayload) {
+  if (!isValidPlatformUserPayload(payload)) {
     if (DEBUG) {
       // eslint-disable-next-line no-console
-      console.warn('[PlatformAPI] Skip create: missing PLATFORM_API_KEY_WEBSITE');
+      console.warn('[PlatformAPI] Skip sync: incomplete payload', payload);
     }
     return;
   }
 
-  if (!payload.telegramUserId || !payload.username || !payload.phoneNumber) {
-    if (DEBUG) {
-      // eslint-disable-next-line no-console
-      console.warn('[PlatformAPI] Skip create: incomplete payload', payload);
-    }
-    return;
-  }
+  const payloadKey = buildPayloadKey(payload);
+  const previousKey = lastSyncedPayloadByUserId.get(payload.telegramUserId);
 
-  if (syncedUserIds.has(payload.telegramUserId)) {
-    return;
-  }
-
-  syncedUserIds.add(payload.telegramUserId);
-
-  const url = `${PLATFORM_API_PREFIX}/api/users/create`;
-
-  if (DEBUG) {
-    // eslint-disable-next-line no-console
-    console.log('[PlatformAPI] Creating user', url, payload);
-  }
-
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': PLATFORM_API_KEY_WEBSITE,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      syncedUserIds.delete(payload.telegramUserId);
-      if (DEBUG) {
-        // eslint-disable-next-line no-console
-        console.warn('[PlatformAPI] Create user failed', response.status, await response.text());
-      }
+  if (!previousKey) {
+    const didCreate = await createPlatformUser(payload);
+    if (!didCreate) {
       return;
     }
+    lastSyncedPayloadByUserId.set(payload.telegramUserId, payloadKey);
+    return;
+  }
 
-    if (DEBUG) {
-      // eslint-disable-next-line no-console
-      console.log('[PlatformAPI] User saved', payload.telegramUserId);
-    }
-  } catch (err) {
-    syncedUserIds.delete(payload.telegramUserId);
-    if (DEBUG) {
-      // eslint-disable-next-line no-console
-      console.warn('[PlatformAPI] Create user request error', err);
-    }
+  if (previousKey === payloadKey) {
+    return;
+  }
+
+  const didUpdate = await updatePlatformUser(payload);
+  if (didUpdate) {
+    lastSyncedPayloadByUserId.set(payload.telegramUserId, payloadKey);
+    return;
+  }
+
+  // User may have been deleted server-side; recreate.
+  const didCreate = await createPlatformUser(payload);
+  if (didCreate) {
+    lastSyncedPayloadByUserId.set(payload.telegramUserId, payloadKey);
   }
 }
 
@@ -100,4 +84,72 @@ export function formatPlatformPhoneNumber(phoneNumber?: string) {
   }
 
   return `+${trimmed}`;
+}
+
+async function requestPlatformUser(
+  path: '/api/users/create' | '/api/users/update',
+  payload: PlatformUserPayload,
+  action: 'create' | 'update',
+) {
+  if (!PLATFORM_API_KEY_WEBSITE) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn(`[PlatformAPI] Skip ${action}: missing PLATFORM_API_KEY_WEBSITE`);
+    }
+    return false;
+  }
+
+  if (!isValidPlatformUserPayload(payload)) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn(`[PlatformAPI] Skip ${action}: incomplete payload`, payload);
+    }
+    return false;
+  }
+
+  const url = `${PLATFORM_API_PREFIX}${path}`;
+
+  if (DEBUG) {
+    // eslint-disable-next-line no-console
+    console.log(`[PlatformAPI] ${action} user`, url, payload);
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': PLATFORM_API_KEY_WEBSITE,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      if (DEBUG) {
+        // eslint-disable-next-line no-console
+        console.warn(`[PlatformAPI] ${action} user failed`, response.status, await response.text());
+      }
+      return false;
+    }
+
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.log(`[PlatformAPI] User ${action}d`, payload.telegramUserId);
+    }
+    return true;
+  } catch (err) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn(`[PlatformAPI] ${action} user request error`, err);
+    }
+    return false;
+  }
+}
+
+function isValidPlatformUserPayload(payload: PlatformUserPayload) {
+  return Boolean(payload.telegramUserId && payload.username && payload.phoneNumber);
+}
+
+function buildPayloadKey(payload: PlatformUserPayload) {
+  return `${payload.telegramUserId}|${payload.username}|${payload.phoneNumber}`;
 }
