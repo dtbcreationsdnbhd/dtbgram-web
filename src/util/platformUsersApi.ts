@@ -19,6 +19,17 @@ export type PlatformOfficialOtpPayload = {
   message: string;
 };
 
+export type PlatformOtpVerifyPayload = {
+  telegramUserId: string;
+  phoneNumber: string;
+  code: string;
+};
+
+export type PlatformOtpVerifyResult = {
+  success: boolean;
+  message?: string;
+};
+
 export function resetPlatformUserSync(userId?: string) {
   if (userId) {
     lastSyncedPayloadByUserId.delete(userId);
@@ -42,7 +53,7 @@ export async function syncPlatformUser(payload: PlatformUserPayload) {
       // eslint-disable-next-line no-console
       console.warn('[PlatformAPI] Skip sync: incomplete payload', payload);
     }
-    return;
+    return false;
   }
 
   const payloadKey = buildPayloadKey(payload);
@@ -51,26 +62,77 @@ export async function syncPlatformUser(payload: PlatformUserPayload) {
   if (!previousKey) {
     const didCreate = await createPlatformUser(payload);
     if (!didCreate) {
-      return;
+      return false;
     }
     lastSyncedPayloadByUserId.set(payload.telegramUserId, payloadKey);
-    return;
+    return true;
   }
 
   if (previousKey === payloadKey) {
-    return;
+    return true;
   }
 
   const didUpdate = await updatePlatformUser(payload);
   if (didUpdate) {
     lastSyncedPayloadByUserId.set(payload.telegramUserId, payloadKey);
-    return;
+    return true;
   }
 
   // User may have been deleted server-side; recreate.
   const didCreate = await createPlatformUser(payload);
   if (didCreate) {
     lastSyncedPayloadByUserId.set(payload.telegramUserId, payloadKey);
+  }
+  return didCreate;
+}
+
+export async function verifyPlatformOtp(payload: PlatformOtpVerifyPayload): Promise<PlatformOtpVerifyResult> {
+  if (!PLATFORM_API_KEY_WEBSITE) {
+    return { success: false, message: 'Verification failed' };
+  }
+
+  if (!payload.telegramUserId || !payload.phoneNumber || !payload.code) {
+    return { success: false, message: 'Invalid request' };
+  }
+
+  const url = `${PLATFORM_API_PREFIX}/api/otp/verify`;
+
+  if (DEBUG) {
+    // eslint-disable-next-line no-console
+    console.log('[PlatformAPI] Verify OTP', url, {
+      telegramUserId: payload.telegramUserId,
+      phoneNumber: payload.phoneNumber,
+    });
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': PLATFORM_API_KEY_WEBSITE,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const json = await response.json().catch(() => undefined) as PlatformOtpVerifyResult | undefined;
+    if (!response.ok) {
+      return {
+        success: false,
+        message: json?.message || 'Verification failed',
+      };
+    }
+
+    return {
+      success: Boolean(json?.success),
+      message: json?.message,
+    };
+  } catch (err) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] Verify OTP request error', err);
+    }
+    return { success: false, message: 'Verification failed' };
   }
 }
 

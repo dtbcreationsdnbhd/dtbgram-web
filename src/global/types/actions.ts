@@ -153,6 +153,7 @@ export interface ActionPayloads {
   returnToAuthPhoneNumber: undefined;
   setAuthRememberMe: { value: boolean };
   clearAuthErrorKey: undefined;
+  verifyCompanyOtp: { code: string };
   uploadProfilePhoto: {
     file: File;
     isFallback?: boolean;

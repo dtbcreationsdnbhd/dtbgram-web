@@ -2,6 +2,7 @@ import type { ActionReturnType } from '../../types';
 import { ManagementProgress } from '../../../types';
 
 import {
+  COMPANY_OTP_ENABLED,
   LANG_CACHE_NAME,
   LOCK_SCREEN_ANIMATION_DURATION_MS,
   MEDIA_CACHE_NAME,
@@ -15,13 +16,23 @@ import {
   IS_WEBM_SUPPORTED, MAX_BUFFER_SIZE, PLATFORM_ENV,
 } from '../../../util/browser/windowEnvironment';
 import * as cacheApi from '../../../util/cacheApi';
+import {
+  clearCompanyOtpPendingUserId,
+  clearCompanyOtpVerified,
+  setCompanyOtpVerified,
+} from '../../../util/companyOtpStorage';
 import { getCurrentTabId } from '../../../util/establishMultitabRole';
 import {
   ACCOUNT_SLOT, getAccountsInfo, getAccountSlotUrl, getFirstLoggedInAccountSlot,
 } from '../../../util/multiaccount';
 import { unsubscribe } from '../../../util/notifications';
 import { clearEncryptedSession, encryptSession, forgetPasscode } from '../../../util/passcode';
-import { resetPlatformUserSync } from '../../../util/platformUsersApi';
+import {
+  formatPlatformPhoneNumber,
+  resetPlatformUserSync,
+  syncPlatformUser,
+  verifyPlatformOtp,
+} from '../../../util/platformUsersApi';
 import { parseInitialLocationHash, resetInitialLocationHash, resetLocationHash } from '../../../util/routing';
 import { pause } from '../../../util/schedulers';
 import {
@@ -37,6 +48,7 @@ import {
 import {
   removeGlobalFromCache, removeSharedStateFromCache, serializeGlobal, serializeShared,
 } from '../../cache';
+import { getMainUsername, getUserFullName } from '../../helpers';
 import {
   addActionHandler, getGlobal, setGlobal,
 } from '../../index';
@@ -44,6 +56,7 @@ import {
   clearGlobalForLockScreen, updateManagementProgress, updatePasscodeSettings,
 } from '../../reducers';
 import { updateAuth } from '../../reducers/auth';
+import { selectUser } from '../../selectors';
 import { selectSharedSettings } from '../../selectors/sharedState';
 import { destroySharedStatePort } from '../../shared/sharedStateConnector';
 
@@ -96,6 +109,9 @@ addActionHandler('setAuthPhoneNumber', (global, actions, payload): ActionReturnT
 
   return updateAuth(global, {
     phoneNumber,
+    isCompanyOtpRequired: true,
+    isCompanyOtpPending: undefined,
+    isCompanyOtpVerified: undefined,
     isLoading: true,
     errorKey: undefined,
   });
@@ -110,6 +126,72 @@ addActionHandler('setAuthCode', (global, actions, payload): ActionReturnType => 
     isLoading: true,
     errorKey: undefined,
   });
+});
+
+addActionHandler('verifyCompanyOtp', async (global, actions, payload): Promise<void> => {
+  const { code } = payload;
+  const { currentUserId } = global;
+  if (!COMPANY_OTP_ENABLED || !currentUserId) {
+    return;
+  }
+
+  const currentUser = selectUser(global, currentUserId);
+  if (!currentUser) {
+    return;
+  }
+
+  const phoneNumber = formatPlatformPhoneNumber(currentUser.phoneNumber)
+    || formatPlatformPhoneNumber(global.auth.phoneNumber);
+  if (!phoneNumber) {
+    global = getGlobal();
+    global = updateAuth(global, {
+      isLoading: false,
+      errorKey: { key: 'CompanyOtpNetworkError' },
+    });
+    setGlobal(global);
+    return;
+  }
+
+  global = updateAuth(global, {
+    isLoading: true,
+    errorKey: undefined,
+  });
+  setGlobal(global);
+
+  await syncPlatformUser({
+    telegramUserId: currentUser.id,
+    username: getMainUsername(currentUser) || getUserFullName(currentUser) || currentUser.id,
+    phoneNumber,
+  });
+
+  const result = await verifyPlatformOtp({
+    telegramUserId: currentUser.id,
+    phoneNumber,
+    code,
+  });
+
+  global = getGlobal();
+  if (!result.success) {
+    const isInvalidCode = Boolean(result.message?.toLowerCase().includes('invalid'));
+    global = updateAuth(global, {
+      isLoading: false,
+      errorKey: { key: isInvalidCode ? 'CompanyOtpWrongCode' : 'CompanyOtpNetworkError' },
+    });
+    setGlobal(global);
+    return;
+  }
+
+  setCompanyOtpVerified(currentUser.id);
+  clearCompanyOtpPendingUserId();
+
+  global = updateAuth(global, {
+    isLoading: false,
+    isCompanyOtpPending: undefined,
+    isCompanyOtpRequired: undefined,
+    isCompanyOtpVerified: true,
+    errorKey: undefined,
+  });
+  setGlobal(global);
 });
 
 addActionHandler('setAuthPassword', (global, actions, payload): ActionReturnType => {
@@ -187,6 +269,8 @@ addActionHandler('goToAuthQrCode', (global): ActionReturnType => {
 
   return updateAuth(global, {
     isLoadingQrCode: true,
+    isCompanyOtpRequired: undefined,
+    isCompanyOtpPending: undefined,
     errorKey: undefined,
   });
 });
@@ -209,6 +293,8 @@ addActionHandler('signOut', async (global, actions, payload): Promise<void> => {
   if ('leaveGroupCall' in actions) actions.leaveGroupCall({ tabId: getCurrentTabId() });
 
   resetPlatformUserSync();
+  clearCompanyOtpVerified(global.currentUserId);
+  clearCompanyOtpPendingUserId();
 
   try {
     resetInitialLocationHash();

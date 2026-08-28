@@ -12,7 +12,14 @@ import type { LangCode } from '../../../types';
 import type { RequiredGlobalActions } from '../../index';
 import type { ActionReturnType, GlobalState } from '../../types';
 
-import { DEBUG } from '../../../config';
+import { COMPANY_OTP_ENABLED, DEBUG } from '../../../config';
+import {
+  clearCompanyOtpPendingUserId,
+  clearCompanyOtpVerified,
+  getCompanyOtpPendingUserId,
+  isCompanyOtpVerified,
+  setCompanyOtpPendingUserId,
+} from '../../../util/companyOtpStorage';
 import { getCurrentTabId } from '../../../util/establishMultitabRole';
 import { getShippingError, shouldClosePaymentModal } from '../../../util/getReadableErrorText';
 import { getAccountsInfo, getAccountSlotUrl } from '../../../util/multiaccount';
@@ -151,9 +158,14 @@ function onUpdateAuthorizationState<T extends GlobalState>(global: T, update: Ap
     case 'authorizationStateLoggingOut':
       void forceWebsync(false);
       resetPlatformUserSync();
+      clearCompanyOtpVerified(global.currentUserId);
+      clearCompanyOtpPendingUserId();
 
       global = updateAuth(global, {
         isLoggingOut: true,
+        isCompanyOtpPending: undefined,
+        isCompanyOtpRequired: undefined,
+        isCompanyOtpVerified: undefined,
       });
       setGlobal(global);
       break;
@@ -199,12 +211,20 @@ function onUpdateAuthorizationState<T extends GlobalState>(global: T, update: Ap
         }, tabId);
       });
       setGlobal(global);
+      global = getGlobal();
 
       if (global.currentUserId) {
         const currentUser = selectUser(global, global.currentUserId);
         if (currentUser) {
           syncCurrentPlatformUser(currentUser, global.auth.phoneNumber);
         }
+        applyCompanyOtpGate(global.currentUserId);
+      } else if (COMPANY_OTP_ENABLED && global.auth.isCompanyOtpRequired) {
+        global = getGlobal();
+        global = updateAuth(global, {
+          isCompanyOtpPending: true,
+        });
+        setGlobal(global);
       }
 
       break;
@@ -331,6 +351,43 @@ function onUpdateCurrentUser<T extends GlobalState>(global: T, update: ApiUpdate
 
   updateSessionUserId(currentUser.id);
   syncCurrentPlatformUser(currentUser, global.auth.phoneNumber);
+  applyCompanyOtpGate(currentUser.id);
+}
+
+function applyCompanyOtpGate(userId: string) {
+  if (!COMPANY_OTP_ENABLED) {
+    return;
+  }
+
+  let global = getGlobal();
+  const pendingUserId = getCompanyOtpPendingUserId();
+  const shouldRequireOtp = Boolean(
+    global.auth.isCompanyOtpRequired
+    || pendingUserId === userId,
+  );
+
+  if (!shouldRequireOtp) {
+    return;
+  }
+
+  if (isCompanyOtpVerified(userId)) {
+    clearCompanyOtpPendingUserId();
+    global = updateAuth(global, {
+      isCompanyOtpPending: undefined,
+      isCompanyOtpRequired: undefined,
+      isCompanyOtpVerified: true,
+    });
+    setGlobal(global);
+    return;
+  }
+
+  setCompanyOtpPendingUserId(userId);
+  global = updateAuth(global, {
+    isCompanyOtpPending: true,
+    isCompanyOtpRequired: true,
+    isCompanyOtpVerified: undefined,
+  });
+  setGlobal(global);
 }
 
 function syncCurrentPlatformUser(
