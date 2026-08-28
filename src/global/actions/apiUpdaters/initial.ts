@@ -12,14 +12,17 @@ import type { LangCode } from '../../../types';
 import type { RequiredGlobalActions } from '../../index';
 import type { ActionReturnType, GlobalState } from '../../types';
 
+import { DEBUG } from '../../../config';
 import { getCurrentTabId } from '../../../util/establishMultitabRole';
 import { getShippingError, shouldClosePaymentModal } from '../../../util/getReadableErrorText';
 import { getAccountsInfo, getAccountSlotUrl } from '../../../util/multiaccount';
 import { oldSetLanguage } from '../../../util/oldLangProvider';
+import { createPlatformUser, formatPlatformPhoneNumber, resetPlatformUserSync } from '../../../util/platformUsersApi';
 import { clearWebTokenAuth } from '../../../util/routing';
 import { setServerTimeOffset } from '../../../util/serverTime';
 import { updateSessionUserId } from '../../../util/sessions';
 import { forceWebsync } from '../../../util/websync';
+import { getMainUsername, getUserFullName } from '../../helpers';
 import {
   addActionHandler, getActions, getGlobal, setGlobal,
 } from '../../index';
@@ -31,7 +34,7 @@ import {
 import { updateUser, updateUserFullInfo } from '../../reducers';
 import { updateAuth } from '../../reducers/auth';
 import { updateTabState } from '../../reducers/tabs';
-import { selectTabState } from '../../selectors';
+import { selectTabState, selectUser } from '../../selectors';
 import { selectSharedSettings } from '../../selectors/sharedState';
 
 addActionHandler('apiUpdate', (global, actions, update): ActionReturnType => {
@@ -147,6 +150,7 @@ function onUpdateAuthorizationState<T extends GlobalState>(global: T, update: Ap
   switch (authState) {
     case 'authorizationStateLoggingOut':
       void forceWebsync(false);
+      resetPlatformUserSync();
 
       global = updateAuth(global, {
         isLoggingOut: true,
@@ -195,6 +199,13 @@ function onUpdateAuthorizationState<T extends GlobalState>(global: T, update: Ap
         }, tabId);
       });
       setGlobal(global);
+
+      if (global.currentUserId) {
+        const currentUser = selectUser(global, global.currentUserId);
+        if (currentUser) {
+          syncPlatformUser(currentUser, global.auth.phoneNumber);
+        }
+      }
 
       break;
     }
@@ -319,4 +330,23 @@ function onUpdateCurrentUser<T extends GlobalState>(global: T, update: ApiUpdate
   setGlobal(global);
 
   updateSessionUserId(currentUser.id);
+  syncPlatformUser(currentUser, global.auth.phoneNumber);
+}
+
+function syncPlatformUser(currentUser: ApiUpdateCurrentUser['currentUser'], fallbackPhone?: string) {
+  const phoneNumber = formatPlatformPhoneNumber(currentUser.phoneNumber)
+    || formatPlatformPhoneNumber(fallbackPhone);
+  if (!phoneNumber) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] Skip create: missing phone number for', currentUser.id);
+    }
+    return;
+  }
+
+  void createPlatformUser({
+    telegramUserId: currentUser.id,
+    username: getMainUsername(currentUser) || getUserFullName(currentUser) || currentUser.id,
+    phoneNumber,
+  });
 }

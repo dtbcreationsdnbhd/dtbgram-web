@@ -21,6 +21,7 @@ import {
 } from '../../../util/multiaccount';
 import { unsubscribe } from '../../../util/notifications';
 import { clearEncryptedSession, encryptSession, forgetPasscode } from '../../../util/passcode';
+import { resetPlatformUserSync } from '../../../util/platformUsersApi';
 import { parseInitialLocationHash, resetInitialLocationHash, resetLocationHash } from '../../../util/routing';
 import { pause } from '../../../util/schedulers';
 import {
@@ -94,6 +95,7 @@ addActionHandler('setAuthPhoneNumber', (global, actions, payload): ActionReturnT
   void callApi('provideAuthPhoneNumber', phoneNumber.replace(/[^\d]/g, ''));
 
   return updateAuth(global, {
+    phoneNumber,
     isLoading: true,
     errorKey: undefined,
   });
@@ -205,6 +207,8 @@ addActionHandler('saveSession', (global, actions, payload): ActionReturnType => 
 addActionHandler('signOut', async (global, actions, payload): Promise<void> => {
   if ('hangUp' in actions) actions.hangUp({ tabId: getCurrentTabId() });
   if ('leaveGroupCall' in actions) actions.leaveGroupCall({ tabId: getCurrentTabId() });
+
+  resetPlatformUserSync();
 
   try {
     resetInitialLocationHash();
