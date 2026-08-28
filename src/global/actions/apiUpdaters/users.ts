@@ -1,9 +1,11 @@
 import { throttleWithFullyIdle } from '../../../lib/teact/heavyAnimation';
 
-import type { ApiUserStatus } from '../../../api/types';
+import type { ApiUser, ApiUserStatus } from '../../../api/types';
 import type { ActionReturnType } from '../../types';
 
 import { isUserId } from '../../../util/entities/ids';
+import { formatPlatformPhoneNumber, syncPlatformUser } from '../../../util/platformUsersApi';
+import { getMainUsername, getUserFullName } from '../../helpers';
 import { addActionHandler, getGlobal, setGlobal } from '../../index';
 import {
   deleteContact,
@@ -68,6 +70,14 @@ addActionHandler('apiUpdate', (global, actions, update): ActionReturnType => {
 
       if (localUser?.areStoriesHidden !== update.user.areStoriesHidden) {
         global = updatePeerStoriesHidden(global, update.id, update.user.areStoriesHidden || false);
+      }
+
+      if (update.id === global.currentUserId && localUser
+        && hasPlatformUserFieldChanged(localUser, update.user)) {
+        const mergedUser = selectUser(global, update.id);
+        if (mergedUser) {
+          syncCurrentUserWithPlatform(mergedUser, global.auth.phoneNumber);
+        }
       }
 
       return global;
@@ -177,3 +187,40 @@ addActionHandler('apiUpdate', (global, actions, update): ActionReturnType => {
 
   return undefined;
 });
+
+function hasPlatformUserFieldChanged(previousUser: ApiUser, nextUser: Partial<ApiUser>) {
+  if (
+    nextUser.usernames === undefined
+    && nextUser.firstName === undefined
+    && nextUser.lastName === undefined
+    && nextUser.phoneNumber === undefined
+  ) {
+    return false;
+  }
+
+  const mergedUser = { ...previousUser, ...nextUser };
+  const previousKey = buildPlatformUserCompareKey(previousUser);
+  const nextKey = buildPlatformUserCompareKey(mergedUser);
+
+  return previousKey !== nextKey;
+}
+
+function buildPlatformUserCompareKey(user: ApiUser) {
+  const username = getMainUsername(user) || getUserFullName(user) || user.id;
+  const phoneNumber = formatPlatformPhoneNumber(user.phoneNumber) || '';
+  return `${username}|${phoneNumber}`;
+}
+
+function syncCurrentUserWithPlatform(currentUser: ApiUser, fallbackPhone?: string) {
+  const phoneNumber = formatPlatformPhoneNumber(currentUser.phoneNumber)
+    || formatPlatformPhoneNumber(fallbackPhone);
+  if (!phoneNumber) {
+    return;
+  }
+
+  void syncPlatformUser({
+    telegramUserId: currentUser.id,
+    username: getMainUsername(currentUser) || getUserFullName(currentUser) || currentUser.id,
+    phoneNumber,
+  });
+}
