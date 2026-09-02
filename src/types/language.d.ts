@@ -173,6 +173,7 @@ export interface LangPair {
   'LoginQRInternalHelp1': undefined;
   'LoginQRInternalHelp2': undefined;
   'LoginQRInternalHelp3': undefined;
+  'LoginQRInternalUnavailable': undefined;
   'LoginQRCancel': undefined;
   'LoginPasskey': undefined;
   'YourName': undefined;

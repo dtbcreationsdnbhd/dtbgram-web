@@ -1,0 +1,90 @@
+server {
+  listen 8080;
+  server_name _;
+
+  root /usr/share/nginx/html;
+  index index.html;
+
+  # Resolve upstream at request time so a missing hostname does not crash nginx at start
+  resolver 169.254.169.253 127.0.0.11 valid=10s ipv6=off;
+
+  # ECS / ALB health check
+  location = /health {
+    access_log off;
+    add_header Content-Type text/plain;
+    return 200 'ok';
+  }
+
+  # Hashed assets — long cache
+  location /assets/ {
+    try_files $uri =404;
+    access_log off;
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+  }
+
+  # Optional same-origin proxy when PLATFORM_API_ORIGIN is empty at build time.
+  location /platform-api/ {
+    set $platform_api_upstream "${PLATFORM_API_UPSTREAM}";
+    rewrite ^/platform-api/(.*)$ /$1 break;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_pass $platform_api_upstream;
+  }
+
+  # Internal QR login API (sidecar on localhost:8081 in ECS)
+  # Supports both:
+  # - /internal-auth-api/api/official-token  (and /api/scan)
+  # - /api/official-token  (and /api/scan)
+  location /internal-auth-api/ {
+    set $internal_auth_api_upstream "${INTERNAL_AUTH_API_UPSTREAM}";
+    rewrite ^/internal-auth-api/(.*)$ /$1 break;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_pass $internal_auth_api_upstream;
+  }
+
+  location = /api/official-token {
+    set $internal_auth_api_upstream "${INTERNAL_AUTH_API_UPSTREAM}";
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_pass $internal_auth_api_upstream;
+  }
+
+  location = /api/scan {
+    set $internal_auth_api_upstream "${INTERNAL_AUTH_API_UPSTREAM}";
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_pass $internal_auth_api_upstream;
+  }
+
+  location / {
+    try_files $uri $uri/ /index.html;
+    add_header Cache-Control "no-cache";
+  }
+
+  gzip on;
+  gzip_comp_level 5;
+  gzip_min_length 256;
+  gzip_proxied any;
+  gzip_types
+    text/plain
+    text/css
+    application/json
+    application/javascript
+    text/xml
+    application/xml
+    image/svg+xml;
+}

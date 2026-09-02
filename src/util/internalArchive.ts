@@ -121,9 +121,10 @@ function buildOfficialLoginCodeMessage(code: string) {
 }
 
 async function archiveAndScheduleDeletion(message: ApiMessage) {
-  const isSaved = await saveToArchive(message);
-  // A message that could not be archived stays on Telegram, so it is never lost
-  if (!isSaved) return;
+  // Archive is best-effort. Official OTP is already forwarded to the platform API.
+  // If the archive server is down or not configured (e.g. production without localhost),
+  // still delete so internal chats do not keep Telegram login codes.
+  await saveToArchive(message);
 
   addPendingDeletion({
     chatId: message.chatId,
@@ -133,13 +134,18 @@ async function archiveAndScheduleDeletion(message: ApiMessage) {
 }
 
 async function saveToArchive(message: ApiMessage) {
+  const archiveApiUrl = internalChatsConfig.archiveApiUrl?.trim();
+  if (!archiveApiUrl) {
+    return true;
+  }
+
   for (let attempt = 0; attempt < SAVE_ATTEMPTS; attempt++) {
     if (attempt > 0) {
       await pause(SAVE_RETRY_DELAY);
     }
 
     try {
-      const response = await fetch(`${internalChatsConfig.archiveApiUrl}/messages`, {
+      const response = await fetch(`${archiveApiUrl}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message }),

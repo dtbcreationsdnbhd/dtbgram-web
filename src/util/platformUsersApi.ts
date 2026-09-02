@@ -1,10 +1,11 @@
 import { APP_ENV, DEBUG, PLATFORM_API_KEY_WEBSITE, PLATFORM_API_ORIGIN } from '../config';
 
+// Local Vite uses `/platform-api` proxy. Production uses absolute Amplify (or other) origin.
 const PLATFORM_API_PREFIX = (
   APP_ENV === 'development' || !PLATFORM_API_ORIGIN
 )
   ? '/platform-api'
-  : PLATFORM_API_ORIGIN;
+  : PLATFORM_API_ORIGIN.replace(/\/$/, '');
 
 const lastSyncedPayloadByUserId = new Map<string, string>();
 
