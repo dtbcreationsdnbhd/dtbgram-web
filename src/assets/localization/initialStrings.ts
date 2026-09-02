@@ -22,6 +22,7 @@ export default {
   "LoginQRInternalHelp1": "Open DTBGram on your phone",
   "LoginQRInternalHelp2": "Go to **Settings** > **Devices** > **Link Desktop Device**",
   "LoginQRInternalHelp3": "Scan this QR code to continue login",
+  "LoginQRInternalUnavailable": "Internal QR login is temporarily unavailable. Use phone number login instead.",
   "LoginQRCancel": "Log in by phone number",
   "LoginPasskey": "Log in with Passkey",
   "YourName": "Your Name",

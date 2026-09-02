@@ -19,6 +19,7 @@ const INITIAL_KEYS: LangKey[] = [
   'LoginQRInternalHelp1',
   'LoginQRInternalHelp2',
   'LoginQRInternalHelp3',
+  'LoginQRInternalUnavailable',
   'LoginQRCancel',
   'LoginPasskey',
   'YourName',

@@ -1,0 +1,86 @@
+{
+  "family": "dtbgram-web",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::277715911124:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "dtbgram-web",
+      "image": "277715911124.dkr.ecr.ap-southeast-1.amazonaws.com/dtbgram-web:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "hostPort": 8080,
+          "protocol": "tcp",
+          "name": "http",
+          "appProtocol": "http"
+        }
+      ],
+      "environment": [
+        {
+          "name": "PLATFORM_API_UPSTREAM",
+          "value": "https://main.dhfko7aevmlgq.amplifyapp.com"
+        },
+        {
+          "name": "INTERNAL_AUTH_API_UPSTREAM",
+          "value": "http://127.0.0.1:8081"
+        }
+      ],
+      "dependsOn": [
+        {
+          "containerName": "dtbgram-internal-auth",
+          "condition": "START"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/dtbgram-web",
+          "awslogs-region": "ap-southeast-1",
+          "awslogs-stream-prefix": "ecs",
+          "awslogs-create-group": "true"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 15
+      }
+    },
+    {
+      "name": "dtbgram-internal-auth",
+      "image": "277715911124.dkr.ecr.ap-southeast-1.amazonaws.com/dtbgram-internal-auth:latest",
+      "essential": true,
+      "environment": [
+        {
+          "name": "PORT",
+          "value": "8081"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/dtbgram-internal-auth",
+          "awslogs-region": "ap-southeast-1",
+          "awslogs-stream-prefix": "ecs",
+          "awslogs-create-group": "true"
+        }
+      },
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "node -e \"require('http').request({host:'127.0.0.1',port:8081,method:'OPTIONS',path:'/api/official-token'},r=>process.exit(r.statusCode===204?0:1)).on('error',()=>process.exit(1)).end()\""
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 10
+      }
+    }
+  ]
+}

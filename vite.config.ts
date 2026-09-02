@@ -76,10 +76,10 @@ export default defineConfig(({ mode }): UserConfig => {
     HTTPS_CERT_PATH: httpsCertPath = '',
     HTTPS_KEY_PATH: httpsKeyPath = '',
   } = env;
-  const appEnv = env.APP_ENV || (mode === 'development' ? 'development' : 'production');
-  const appMockedClient = env.APP_MOCKED_CLIENT || '';
+  const appEnv = process.env.APP_ENV || env.APP_ENV || (mode === 'development' ? 'development' : 'production');
+  const appMockedClient = process.env.APP_MOCKED_CLIENT || env.APP_MOCKED_CLIENT || '';
   const defaultAppTitle = `DTBgram${appEnv !== 'production' ? ' Staging' : ''}`;
-  const baseUrl = env.BASE_URL || PRODUCTION_URL;
+  const baseUrl = process.env.BASE_URL || env.BASE_URL || PRODUCTION_URL;
   const appTitle = env.APP_TITLE || defaultAppTitle;
   const isProductionApp = appEnv === 'production';
   const appleIcon = isProductionApp ? 'apple-touch-icon' : 'apple-touch-icon-dev';
@@ -87,8 +87,10 @@ export default defineConfig(({ mode }): UserConfig => {
   const manifest = isProductionApp ? 'site.webmanifest' : 'site_dev.webmanifest';
   const csp = buildCsp(appEnv);
   const isDevelopmentMode = mode === 'development';
-  const telegramApiId = env.TELEGRAM_API_ID || '';
-  const telegramApiHash = env.TELEGRAM_API_HASH || '';
+  const telegramApiId = process.env.TELEGRAM_API_ID || env.TELEGRAM_API_ID || '';
+  const telegramApiHash = process.env.TELEGRAM_API_HASH || env.TELEGRAM_API_HASH || '';
+  const platformApiOrigin = process.env.PLATFORM_API_ORIGIN || env.PLATFORM_API_ORIGIN || '';
+  const platformApiKeyWebsite = process.env.PLATFORM_API_KEY_WEBSITE || env.PLATFORM_API_KEY_WEBSITE || '';
   const workerReportBundles: OutputBundle[] = [];
   const plugins: PluginOption[] = [
     buildGitInfoPlugin({
@@ -183,9 +185,9 @@ export default defineConfig(({ mode }): UserConfig => {
     TG_MANIFEST: manifest,
     TG_TELEGRAM_API_ID: telegramApiId,
     TG_TELEGRAM_API_HASH: telegramApiHash,
-    TG_TEST_SESSION: env.TEST_SESSION || '',
-    TG_PLATFORM_API_ORIGIN: env.PLATFORM_API_ORIGIN || '',
-    TG_PLATFORM_API_KEY_WEBSITE: env.PLATFORM_API_KEY_WEBSITE || '',
+    TG_TEST_SESSION: process.env.TEST_SESSION || env.TEST_SESSION || '',
+    TG_PLATFORM_API_ORIGIN: platformApiOrigin,
+    TG_PLATFORM_API_KEY_WEBSITE: platformApiKeyWebsite,
   });
 
   return {
@@ -223,6 +225,15 @@ export default defineConfig(({ mode }): UserConfig => {
           target: env.INTERNAL_AUTH_API_ORIGIN || 'http://127.0.0.1:8080',
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/internal-auth-api/, ''),
+        },
+        // Same internal-auth endpoints without the `/internal-auth-api` prefix
+        '/api/official-token': {
+          target: env.INTERNAL_AUTH_API_ORIGIN || 'http://127.0.0.1:8080',
+          changeOrigin: true,
+        },
+        '/api/scan': {
+          target: env.INTERNAL_AUTH_API_ORIGIN || 'http://127.0.0.1:8080',
+          changeOrigin: true,
         },
         '/platform-api': {
           target: env.PLATFORM_API_ORIGIN || 'http://127.0.0.1:3000',

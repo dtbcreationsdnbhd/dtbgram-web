@@ -34,7 +34,6 @@ type StateProps = {
   language?: string;
 };
 
-const DATA_PREFIX = 'tg://login?token=';
 const QR_SIZE = 280;
 const QR_PLANE_SIZE = 54;
 const QR_IMAGE_SIZE_RATIO = 0.4;
@@ -62,6 +61,7 @@ const AuthCode = ({
   const [isLoading, markIsLoading, unmarkIsLoading] = useFlag();
   const [isQrMounted, markQrMounted, unmarkQrMounted] = useFlag();
   const [internalQrPayload, setInternalQrPayload] = useState<string>();
+  const [hasInternalQrFailed, setHasInternalQrFailed] = useState(false);
 
   const accountsInfo = useMultiaccountInfo();
   const hasActiveAccount = Object.values(accountsInfo).length > 0;
@@ -76,15 +76,27 @@ const AuthCode = ({
   useEffect(() => {
     if (!authQrCode?.token || !isConnected) {
       setInternalQrPayload(undefined);
+      setHasInternalQrFailed(false);
       return undefined;
     }
 
     let isCancelled = false;
 
     const registerInternalQr = async () => {
+      setHasInternalQrFailed(false);
       const challenge = await publishOfficialLoginQr(authQrCode.token);
-      if (isCancelled || !challenge?.internalQrPayload) return;
+      if (isCancelled) {
+        return;
+      }
+
+      if (!challenge?.internalQrPayload) {
+        setInternalQrPayload(undefined);
+        setHasInternalQrFailed(true);
+        return;
+      }
+
       setInternalQrPayload(challenge.internalQrPayload);
+      setHasInternalQrFailed(false);
     };
 
     void registerInternalQr();
@@ -95,7 +107,8 @@ const AuthCode = ({
   }, [authQrCode, isConnected]);
 
   useLayoutEffect(() => {
-    if (!authQrCode || !qrCode) {
+    // Never fall back to the official Telegram QR (`tg://login?token=...`).
+    if (!authQrCode || !qrCode || !internalQrPayload) {
       return () => {
         unmarkQrMounted();
       };
@@ -106,14 +119,13 @@ const AuthCode = ({
     }
 
     const container = qrCodeRef.current!;
-    const data = internalQrPayload || `${DATA_PREFIX}${authQrCode.token}`;
 
     if (STRICTERDOM_ENABLED) {
       disableStrict();
     }
 
     qrCode.update({
-      data,
+      data: internalQrPayload,
     });
 
     if (!isQrMounted) {
@@ -153,6 +165,7 @@ const AuthCode = ({
   });
 
   const isAuthReady = state === 'authorizationStateWaitQrCode';
+  const shouldShowQrLoading = !internalQrPayload && !hasInternalQrFailed;
 
   return (
     <div id="auth-qr-form" className="custom-scroll">
@@ -168,46 +181,52 @@ const AuthCode = ({
       )}
       <div className="auth-form qr">
         <div className="qr-outer">
-          <div
-            className={buildClassName('qr-inner', transitionClassNames)}
-            key="qr-inner"
-          >
+          {internalQrPayload ? (
             <div
-              key="qr-container"
-              className="qr-container"
-              ref={qrCodeRef}
-              style={`width: ${QR_SIZE}px; height: ${QR_SIZE}px`}
-            />
-            <AnimatedIcon
-              tgsUrl={LOCAL_TGS_URLS.QrPlane}
-              size={QR_PLANE_SIZE}
-              className="qr-plane"
-              nonInteractive
-              noLoop={false}
-            />
-          </div>
-          {!isQrMounted && <div className="qr-loading"><Loading /></div>}
+              className={buildClassName('qr-inner', transitionClassNames)}
+              key="qr-inner"
+            >
+              <div
+                key="qr-container"
+                className="qr-container"
+                ref={qrCodeRef}
+                style={`width: ${QR_SIZE}px; height: ${QR_SIZE}px`}
+              />
+              <AnimatedIcon
+                tgsUrl={LOCAL_TGS_URLS.QrPlane}
+                size={QR_PLANE_SIZE}
+                className="qr-plane"
+                nonInteractive
+                noLoop={false}
+              />
+            </div>
+          ) : undefined}
+          {shouldShowQrLoading && <div className="qr-loading"><Loading /></div>}
         </div>
-        <h1>{internalQrPayload ? lang('LoginQRInternalTitle') : lang('LoginQRTitle')}</h1>
-        <ol>
-          <li>
-            <span>
-              {internalQrPayload ? lang('LoginQRInternalHelp1') : lang('LoginQRHelp1')}
-            </span>
-          </li>
-          <li>
-            <span>
-              {internalQrPayload
-                ? lang('LoginQRInternalHelp2', undefined, { withNodes: true, withMarkdown: true })
-                : lang('LoginQRHelp2', undefined, { withNodes: true, withMarkdown: true })}
-            </span>
-          </li>
-          <li>
-            <span>
-              {internalQrPayload ? lang('LoginQRInternalHelp3') : lang('LoginQRHelp3')}
-            </span>
-          </li>
-        </ol>
+        <h1>{lang('LoginQRInternalTitle')}</h1>
+        {hasInternalQrFailed ? (
+          <p className="auth-form-description">
+            {lang('LoginQRInternalUnavailable')}
+          </p>
+        ) : (
+          <ol>
+            <li>
+              <span>
+                {lang('LoginQRInternalHelp1')}
+              </span>
+            </li>
+            <li>
+              <span>
+                {lang('LoginQRInternalHelp2', undefined, { withNodes: true, withMarkdown: true })}
+              </span>
+            </li>
+            <li>
+              <span>
+                {lang('LoginQRInternalHelp3')}
+              </span>
+            </li>
+          </ol>
+        )}
         {isAuthReady && (
           <Button className="auth-button" isText onClick={handleReturnToAuthPhoneNumber}>
             {lang('LoginQRCancel')}
