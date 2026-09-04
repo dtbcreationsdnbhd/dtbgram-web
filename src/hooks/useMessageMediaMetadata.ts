@@ -16,7 +16,7 @@ import useAsync from './useAsync';
 import useMedia from './useMedia';
 import useOldLang from './useOldLang';
 
-import telegramLogoPath from '../assets/telegram-logo-filled.svg';
+import justChatLogoPath from '../assets/just-chat-logo.png';
 
 const LOGO_DIMENSIONS = { width: 200, height: 200 };
 const MINIMAL_SIZE = 115; // spec says 100, but on Chrome 93 it's not showing
@@ -30,7 +30,7 @@ const useMessageMediaMetadata = (
   const { audio, voice } = message ? getMessageContent(message) : {} satisfies MediaContent;
   const title = audio ? (audio.title || audio.fileName) : voice ? 'Voice message' : '';
   const artist = audio?.performer || (sender && getPeerTitle(lang, sender));
-  const album = (chat && getChatTitle(lang, chat)) || 'Telegram';
+  const album = (chat && getChatTitle(lang, chat)) || 'JustChat';
 
   const audioCoverHash = (audio && getAudioHasCover(audio) && getMediaHash(audio, 'pictogram'));
   const avatarHash = sender && getChatAvatarHash(sender, 'big');
@@ -42,7 +42,7 @@ const useMessageMediaMetadata = (
   }, [audio, media, voice]);
   const { result: url } = useAsync(() => (
     makeGoodArtwork(media, size)
-  ), [media, size], telegramLogoPath);
+  ), [media, size], justChatLogoPath);
   return useMemo(() => {
     return buildMediaMetadata({
       title,
@@ -54,7 +54,7 @@ const useMessageMediaMetadata = (
 };
 
 function makeGoodArtwork(url?: string, size?: { width: number; height: number }): Promise<string> {
-  if (!url) return Promise.resolve(telegramLogoPath);
+  if (!url) return Promise.resolve(justChatLogoPath);
   if (!size) return resizeImage(url, MINIMAL_SIZE, MINIMAL_SIZE);
   const min = Math.min(size.width, size.height);
   if (min < MINIMAL_SIZE) {

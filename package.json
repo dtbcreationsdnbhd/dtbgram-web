@@ -1,7 +1,7 @@
 {
   "name": "dtbgram",
   "version": "12.0.39",
-  "description": "",
+  "description": "JustChat web client",
   "author": "DTB (info@dtb.dev)",
   "license": "GPL-3.0-or-later",
   "type": "module",

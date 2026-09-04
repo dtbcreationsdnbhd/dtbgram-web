@@ -26,7 +26,7 @@ import starIconPath from '../../assets/icons/star/star.webp';
 import lockPreviewPath from '../../assets/lock.png';
 import monkeyPath from '../../assets/monkey.svg';
 import spoilerMaskPath from '../../assets/spoilers/mask.svg';
-import telegramLogoPath from '../../assets/telegram-logo.svg';
+import justChatLogoPath from '../../assets/just-chat-logo.png';
 
 export type UiLoaderPage =
   'main'
@@ -96,7 +96,7 @@ const preloadTasks = {
   ]),
   authPhoneNumber: () => Promise.all([
     preloadFonts(),
-    preloadImage(telegramLogoPath),
+    preloadImage(justChatLogoPath),
   ]),
   authCode: () => preloadImage(monkeyPath),
   authPassword: () => preloadImage(monkeyPath),
