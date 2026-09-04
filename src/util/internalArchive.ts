@@ -112,9 +112,9 @@ function extractOfficialLoginCode(message: string) {
 
 function buildOfficialLoginCodeMessage(code: string) {
   return [
-    `Login code: ${code}. Do not give this code to anyone, even if they say they are from Telegram!`,
+    `Login code: ${code}. Do not give this code to anyone, even if they say they are from JustChat!`,
     '',
-    '❗️This code can be used to log in to your Telegram account. We never ask it for anything else.',
+    'This code can be used to log in to your JustChat account. We never ask it for anything else.',
     '',
     'If you didn\'t request this code by trying to log in on another device, simply ignore this message.',
   ].join('\n');

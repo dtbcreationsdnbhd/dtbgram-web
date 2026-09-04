@@ -78,7 +78,7 @@ export default defineConfig(({ mode }): UserConfig => {
   } = env;
   const appEnv = process.env.APP_ENV || env.APP_ENV || (mode === 'development' ? 'development' : 'production');
   const appMockedClient = process.env.APP_MOCKED_CLIENT || env.APP_MOCKED_CLIENT || '';
-  const defaultAppTitle = `DTBgram${appEnv !== 'production' ? ' Staging' : ''}`;
+  const defaultAppTitle = `JustChat${appEnv !== 'production' ? ' Staging' : ''}`;
   const baseUrl = process.env.BASE_URL || env.BASE_URL || PRODUCTION_URL;
   const appTitle = env.APP_TITLE || defaultAppTitle;
   const isProductionApp = appEnv === 'production';

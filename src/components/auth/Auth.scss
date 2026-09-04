@@ -34,8 +34,9 @@
   }
 
   #logo {
-    background: url("../../assets/telegram-logo.svg") center no-repeat;
-    background-size: 100%;
+    background: url("../../assets/just-chat-logo.png") center no-repeat;
+    background-size: contain;
+    border-radius: 1.25rem;
   }
 
   h1 {
@@ -176,9 +177,11 @@
     left: 50%;
     transform: translate(-50%, -50%);
 
-    border-radius: 50%;
+    object-fit: contain;
+    border-radius: 0.75rem;
 
-    background-color: var(--color-telegram-blue);
+    background-color: var(--color-white);
+    box-shadow: 0 0 0 0.25rem var(--color-white);
   }
 
   .qr-container {

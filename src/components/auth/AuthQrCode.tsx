@@ -12,7 +12,6 @@ import buildClassName from '../../util/buildClassName';
 import { publishOfficialLoginQr } from '../../util/internalQrAuth';
 import { oldSetLanguage } from '../../util/oldLangProvider';
 import { createStyledQrCode } from '../../util/qrCode/buildStyledQrCode';
-import { LOCAL_TGS_URLS } from '../common/helpers/animatedAssets';
 import { navigateBack } from './helpers/backNavigation';
 import { getSuggestedLanguage } from './helpers/getSuggestedLanguage';
 
@@ -24,9 +23,10 @@ import useLastCallback from '../../hooks/useLastCallback';
 import useMediaTransitionDeprecated from '../../hooks/useMediaTransitionDeprecated';
 import useMultiaccountInfo from '../../hooks/useMultiaccountInfo';
 
-import AnimatedIcon from '../common/AnimatedIcon';
 import Button from '../ui/Button';
 import Loading from '../ui/Loading';
+
+import justChatLogoPath from '../../assets/just-chat-logo.png';
 
 type StateProps = {
   auth: GlobalState['auth'];
@@ -192,12 +192,13 @@ const AuthCode = ({
                 ref={qrCodeRef}
                 style={`width: ${QR_SIZE}px; height: ${QR_SIZE}px`}
               />
-              <AnimatedIcon
-                tgsUrl={LOCAL_TGS_URLS.QrPlane}
-                size={QR_PLANE_SIZE}
+              <img
+                src={justChatLogoPath}
+                alt=""
+                width={QR_PLANE_SIZE}
+                height={QR_PLANE_SIZE}
                 className="qr-plane"
-                nonInteractive
-                noLoop={false}
+                draggable={false}
               />
             </div>
           ) : undefined}
