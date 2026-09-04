@@ -7,8 +7,8 @@ import { DARK_THEME_BG_COLOR } from '../config';
 import { buildColorFromHex, getPatternColor, int2hex } from './colors';
 
 const DEFAULT_PATTERN_INTENSITY = 50;
-const DEFAULT_LIGHT_ACTION_MESSAGE_BG = '#4A8E3A8C';
-const DEFAULT_DARK_ACTION_MESSAGE_BG = '#48576166';
+const DEFAULT_LIGHT_ACTION_MESSAGE_BG = '#00000066';
+const DEFAULT_DARK_ACTION_MESSAGE_BG = '#ffffff33';
 // The user slider scales the wallpaper's own intensity: 100 keeps it as is, 0 hides the pattern
 const MAX_PATTERN_INTENSITY_FACTOR = 100;
 export const DEFAULT_PATTERN_INTENSITY_FACTOR = 75;
@@ -50,19 +50,17 @@ export const RESET_WALLPAPER_SETTINGS: Partial<IThemeSettings> = {
   patternIntensityFactor: undefined,
 };
 
-// Dark default chat wallpaper rendered through the same gradient engine as any picked wallpaper
-// Negative intensity => the pattern masks the gradient (doodles reveal the animated gradient over
-// a dark base), matching Telegram's dark-wallpaper convention.
+// Solid dark chat background (no Telegram gradient / pattern)
 export const DEFAULT_DARK_WALLPAPER: DefaultWallpaper = {
-  colors: ['#4f5bd5', '#962fbf', '#dd6cb9', '#fec496'],
-  patternColor: getWallpaperPatternColor('#4f5bd5'),
-  intensity: -DEFAULT_PATTERN_INTENSITY,
+  colors: ['#000000'],
+  patternColor: getWallpaperPatternColor('#000000'),
+  intensity: 0,
 };
 
 export const DEFAULT_LIGHT_WALLPAPER: DefaultWallpaper = {
-  colors: ['#bdcd8c', '#8eba89', '#83b28f', '#c5d3b0'],
-  patternColor: getWallpaperPatternColor('#bdcd8c'),
-  intensity: DEFAULT_PATTERN_INTENSITY,
+  colors: ['#e0e0e0'],
+  patternColor: getWallpaperPatternColor('#e0e0e0'),
+  intensity: 0,
 };
 
 // Negative intensity means the pattern masks the gradient (doodles reveal it over a dark base),
