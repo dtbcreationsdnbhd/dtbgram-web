@@ -5,6 +5,7 @@ import { getActions, withGlobal } from '../../global';
 
 import type { GlobalState } from '../../global/types';
 
+import { COMPANY_OTP_ENABLED } from '../../config';
 import { IS_TAURI } from '../../util/browser/globalEnvironment';
 import { IS_MAC_OS, PLATFORM_ENV } from '../../util/browser/windowEnvironment';
 
@@ -57,7 +58,7 @@ const Auth = ({
   );
 
   function getScreen() {
-    if (isCompanyOtpPending) {
+    if (COMPANY_OTP_ENABLED && isCompanyOtpPending) {
       return <AuthCompanyOtp />;
     }
 
@@ -78,7 +79,7 @@ const Auth = ({
   }
 
   function getActiveKey() {
-    if (isCompanyOtpPending) {
+    if (COMPANY_OTP_ENABLED && isCompanyOtpPending) {
       return 5;
     }
 
@@ -114,7 +115,7 @@ export default memo(withGlobal(
   (global): Complete<StateProps> => {
     return {
       authState: global.auth.state,
-      isCompanyOtpPending: global.auth.isCompanyOtpPending,
+      isCompanyOtpPending: COMPANY_OTP_ENABLED ? global.auth.isCompanyOtpPending : undefined,
     };
   },
 )(Auth));

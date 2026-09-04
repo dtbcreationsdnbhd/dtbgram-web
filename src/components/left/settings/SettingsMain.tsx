@@ -19,6 +19,7 @@ import useFlag from '../../../hooks/useFlag';
 import useHistoryBack from '../../../hooks/useHistoryBack';
 import useLang from '../../../hooks/useLang';
 import useLastCallback from '../../../hooks/useLastCallback';
+import useOldLang from '../../../hooks/useOldLang';
 
 import ChatExtra from '../../common/profile/ChatExtra';
 import ProfileInfo from '../../common/profile/ProfileInfo';
@@ -60,11 +61,14 @@ const SettingsMain: FC<OwnProps & StateProps> = ({
     openGiftRecipientPicker,
     openStarsBalanceModal,
     openSettingsScreen,
+    signOut,
   } = getActions();
 
   const [isSupportDialogOpen, openSupportDialog, closeSupportDialog] = useFlag(false);
+  const [isSignOutDialogOpen, openSignOutConfirmation, closeSignOutConfirmation] = useFlag(false);
 
   const lang = useLang();
+  const oldLang = useOldLang();
 
   useEffect(() => {
     if (currentUserId) {
@@ -80,6 +84,11 @@ const SettingsMain: FC<OwnProps & StateProps> = ({
   const handleOpenSupport = useLastCallback(() => {
     openSupportChat();
     closeSupportDialog();
+  });
+
+  const handleSignOut = useLastCallback(() => {
+    closeSignOutConfirmation();
+    signOut({ forceInitApi: true });
   });
 
   return (
@@ -303,6 +312,17 @@ const SettingsMain: FC<OwnProps & StateProps> = ({
             {lang('MenuPrivacyPolicy')}
           </ListItem>
         </Island>
+
+        <Island>
+          <ListItem
+            icon="logout"
+            destructive
+            narrow
+            onClick={openSignOutConfirmation}
+          >
+            {lang('LogOutTitle')}
+          </ListItem>
+        </Island>
       </div>
       <ConfirmDialog
         isOpen={isSupportDialogOpen}
@@ -311,6 +331,14 @@ const SettingsMain: FC<OwnProps & StateProps> = ({
         textParts={lang('MenuAskText', undefined, { withNodes: true, renderTextFilters: ['br'] })}
         confirmHandler={handleOpenSupport}
         onClose={closeSupportDialog}
+      />
+      <ConfirmDialog
+        isOpen={isSignOutDialogOpen}
+        onClose={closeSignOutConfirmation}
+        text={oldLang('lng_sure_logout')}
+        confirmLabel={oldLang('AccountSettings.Logout')}
+        confirmHandler={handleSignOut}
+        confirmIsDestructive
       />
     </div>
   );

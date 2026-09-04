@@ -356,6 +356,16 @@ function onUpdateCurrentUser<T extends GlobalState>(global: T, update: ApiUpdate
 
 function applyCompanyOtpGate(userId: string) {
   if (!COMPANY_OTP_ENABLED) {
+    clearCompanyOtpPendingUserId();
+    let global = getGlobal();
+    if (global.auth.isCompanyOtpPending || global.auth.isCompanyOtpRequired) {
+      global = updateAuth(global, {
+        isCompanyOtpPending: undefined,
+        isCompanyOtpRequired: undefined,
+        isCompanyOtpVerified: undefined,
+      });
+      setGlobal(global);
+    }
     return;
   }
 

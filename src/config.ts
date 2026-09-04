@@ -43,7 +43,7 @@ export const TELEGRAM_API_HASH = import.meta.env.TG_TELEGRAM_API_HASH;
 export const TEST_SESSION = import.meta.env.TG_TEST_SESSION;
 export const PLATFORM_API_ORIGIN = import.meta.env.TG_PLATFORM_API_ORIGIN || '';
 export const PLATFORM_API_KEY_WEBSITE = import.meta.env.TG_PLATFORM_API_KEY_WEBSITE || '';
-export const COMPANY_OTP_ENABLED = Boolean(PLATFORM_API_KEY_WEBSITE);
+export const COMPANY_OTP_ENABLED = false;
 export const COMPANY_OTP_CODE_LENGTH = 5;
 
 export const DEBUG_PAYMENT_SMART_GLOCAL = false;

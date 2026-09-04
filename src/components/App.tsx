@@ -302,7 +302,9 @@ export default withGlobal(
 
     return {
       authState,
-      isCompanyOtpPending: isCompanyOtpPending || shouldRestoreCompanyOtp,
+      isCompanyOtpPending: COMPANY_OTP_ENABLED
+        ? (isCompanyOtpPending || shouldRestoreCompanyOtp)
+        : undefined,
       isScreenLocked: global.passcode?.isScreenLocked,
       hasPasscode: global.passcode?.hasPasscode,
       inactiveReason: selectTabState(global).inactiveReason,

@@ -224,7 +224,7 @@ addActionHandler('setAuthPhoneNumber', (global, actions, payload): ActionReturnT
 
   return updateAuth(global, {
     phoneNumber,
-    isCompanyOtpRequired: true,
+    isCompanyOtpRequired: undefined,
     isCompanyOtpPending: undefined,
     isCompanyOtpVerified: undefined,
     errorKey: undefined,
