@@ -400,7 +400,7 @@ export const BOT_VERIFICATION_PEERS_LIMIT = 20;
 
 export const CALL_PROTOCOL_LIBRARY_VERSIONS = ['13.0.0'];
 
-export const LIGHT_THEME_BG_COLOR = '#99BA92';
+export const LIGHT_THEME_BG_COLOR = '#bababa';
 export const DARK_THEME_BG_COLOR = '#000000';
 export const PEER_COLOR_BG_OPACITY = '1a';
 export const PEER_COLOR_BG_ACTIVE_OPACITY = '2b';
