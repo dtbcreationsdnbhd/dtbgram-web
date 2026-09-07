@@ -9,6 +9,9 @@ import type { ThemeKey } from '../../../types';
 import { LeftColumnContent, SettingsScreens } from '../../../types';
 
 import {
+  APP_NAME,
+} from '../../../config';
+import {
   selectCanSetPasscode,
   selectCurrentMessageList,
   selectIsCurrentUserPremium,
@@ -41,6 +44,8 @@ import ConnectionStatusOverlay from '../ConnectionStatusOverlay';
 import StatusButton from './StatusButton';
 
 import './LeftMainHeader.scss';
+
+import justChatLogoPath from '../../../assets/just-chat-logo.png';
 
 type OwnProps = {
   shouldHideSearch?: boolean;
@@ -247,6 +252,24 @@ const LeftMainHeader = ({
 
   return (
     <div className="LeftMainHeader">
+      <div
+        className="LeftMainHeader-brand"
+        data-tauri-drag-region={IS_WITH_WINDOW_BUTTONS ? true : undefined}
+      >
+        <div className="LeftMainHeader-brandMark">
+          <img
+            src={justChatLogoPath}
+            alt=""
+            className="LeftMainHeader-brandIcon"
+            width={32}
+            height={32}
+            draggable={false}
+          />
+        </div>
+        <div className="LeftMainHeader-brandText">
+          <h1 className="LeftMainHeader-brandTitle">{APP_NAME}</h1>
+        </div>
+      </div>
       <div
         id="LeftMainHeader"
         className="left-header"
