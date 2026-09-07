@@ -19,9 +19,9 @@
 }
 
 @layer variables {
-  $color-primary: #3390ec;
+  $color-primary: #fb5d00;
 
-  $color-links: #3390ec;
+  $color-links: #fb5d00;
 
   $color-placeholders: #a2acb4;
 
@@ -51,20 +51,20 @@
   $color-item-hover: #f4f4f5;
   $color-item-active: #ededed;
   $color-chat-hover: #f4f4f5;
-  $color-chat-active: #3390ec;
-  $color-selection: #3993fb;
+  $color-chat-active: #fb5d00;
+  $color-selection: #ff7a2e;
 
-  $color-message-reaction: #ebf3fd;
-  $color-message-reaction-hover: #c5def9;
+  $color-message-reaction: #fff0e6;
+  $color-message-reaction-hover: #ffd7b8;
   $color-message-reaction-own: #cef0ba;
   $color-message-reaction-own-hover: #b5e0a4;
-  $color-message-reaction-chosen-hover: #1a82ea;
+  $color-message-reaction-chosen-hover: #e05300;
   $color-message-reaction-chosen-hover-own: #3f9d4b;
 
   $color-message-non-contact: #cceebf;
 
   $color-message-story-mention-from: #4ef390;
-  $color-message-story-mention-to: #74bcff;
+  $color-message-story-mention-to: #ff9a4a;
 
   :root {
     --color-background: #{$color-white};
@@ -105,7 +105,7 @@
     --color-composer-button: #{$color-text-secondary}CC;
     --color-toast-background: #202020CC;
 
-    --color-voice-transcribe-button: #e8f3ff;
+    --color-voice-transcribe-button: #fff0e6;
     --color-voice-transcribe-button-own: #cceebf;
 
     --color-primary: #{$color-primary};
@@ -147,7 +147,7 @@
 
     --color-list-icon: #{$color-white};
 
-    --color-code: #4a729a;
+    --color-code: #c44e00;
     --color-code-bg: #{rgba($color-text-secondary, 0.08)};
     --color-code-own: #3c7940;
     --color-code-own-bg: #{rgba($color-text-secondary, 0.08)};
@@ -180,7 +180,7 @@
     --color-white: #{$color-white};
     --color-gray: #{$color-gray};
 
-    --color-chat-username: #3C7EB0;
+    --color-chat-username: #c44e00;
     --color-chat-hover: #{$color-chat-hover};
     --color-chat-active: #{$color-chat-active};
     --color-item-hover: #{$color-item-hover};
@@ -190,7 +190,7 @@
     --color-selection-highlight-emoji: rgba(#{toRGB($color-selection)}, 0.7);
 
     --color-avatar-story-unread-from: #34c578;
-    --color-avatar-story-unread-to: #3ca3f3;
+    --color-avatar-story-unread-to: #fb5d00;
     --color-avatar-story-friend-unread-from: #c9eb38;
     --color-avatar-story-friend-unread-to: #09c167;
 
