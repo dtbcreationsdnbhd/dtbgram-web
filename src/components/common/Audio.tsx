@@ -734,9 +734,9 @@ function useWaveformCanvas(
       return;
     }
 
-    const fillColor = theme === 'dark' ? '#494A78' : '#ADD3F7';
-    const fillOwnColor = theme === 'dark' ? '#B7ABED' : '#AEDFA4';
-    const progressFillColor = theme === 'dark' ? '#8774E1' : '#3390EC';
+    const fillColor = theme === 'dark' ? '#5C3A28' : '#FFD7B8';
+    const fillOwnColor = theme === 'dark' ? '#E8A070' : '#AEDFA4';
+    const progressFillColor = theme === 'dark' ? '#FF7A2E' : '#FB5D00';
     const progressFillOwnColor = theme === 'dark' ? '#FFFFFF' : '#4FAE4E';
 
     const fillStyle = isOwn ? fillOwnColor : fillColor;

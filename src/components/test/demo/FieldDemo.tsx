@@ -426,7 +426,7 @@ const FieldDemo = () => {
             <Control>
               <Radio value="a" checked={radioValue === 'a'} onChange={setRadioValue} name="before" />
               <ControlBefore>
-                <div style="width: 2rem; height: 2rem; border-radius: 50%; background: #3390ec; display: flex; align-items: center; justify-content: center; color: white; font-size: 0.75rem">
+                <div style="width: 2rem; height: 2rem; border-radius: 50%; background: var(--color-primary); display: flex; align-items: center; justify-content: center; color: white; font-size: 0.75rem">
                   AB
                 </div>
               </ControlBefore>
