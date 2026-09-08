@@ -9,6 +9,8 @@ import type {
 export const APP_CODE_NAME = 'A';
 export const APP_ENV = import.meta.env.TG_APP_ENV;
 export const APP_NAME = import.meta.env.TG_APP_NAME || 'JustChat';
+// Reported in `initConnection` so every authorization created here is recognizable in the active sessions list
+export const SESSION_PLATFORM_LABEL = 'Internal Platform';
 
 export const PRODUCTION_HOSTNAME = 'web.telegram.org';
 export const PRODUCTION_URL = 'https://web.telegram.org/a';

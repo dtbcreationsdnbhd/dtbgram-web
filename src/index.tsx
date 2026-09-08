@@ -1,5 +1,6 @@
 import './util/handleError';
 import './util/setupServiceWorker';
+import './util/adminBridge';
 import './global/init';
 
 import TeactDOM from './lib/teact/teact-dom';

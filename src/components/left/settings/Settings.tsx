@@ -22,6 +22,7 @@ import SettingsActiveWebsites from './SettingsActiveWebsites';
 import SettingsAutoDeleteMessages from './SettingsAutoDeleteMessages';
 import SettingsCustomEmoji from './SettingsCustomEmoji';
 import SettingsDataStorage from './SettingsDataStorage';
+import SettingsDevicesOverview from './SettingsDevicesOverview';
 import SettingsDoNotTranslate from './SettingsDoNotTranslate';
 import SettingsEditProfile from './SettingsEditProfile';
 import SettingsExperimental from './SettingsExperimental';
@@ -337,6 +338,13 @@ const Settings: FC<OwnProps> = ({
       case SettingsScreens.ActiveSessions:
         return (
           <SettingsActiveSessions
+            isActive={isScreenActive}
+            onReset={handleReset}
+          />
+        );
+      case SettingsScreens.DevicesOverview:
+        return (
+          <SettingsDevicesOverview
             isActive={isScreenActive}
             onReset={handleReset}
           />

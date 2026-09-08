@@ -3,9 +3,13 @@ import { memo, useCallback } from '../../../lib/teact/teact';
 import { getActions, withGlobal } from '../../../global';
 
 import type { ApiSession } from '../../../api/types';
+import type { RegularLangKey } from '../../../types/language';
+import type { SessionOrigin } from './helpers/getSessionOrigin';
 
 import { formatDateTimeToString } from '../../../util/dates/oldDateFormat';
 import getSessionIcon, { DEVICE_BACKDROP } from './helpers/getSessionIcon';
+import getSessionLocation from './helpers/getSessionLocation';
+import getSessionOrigin, { stripSessionPlatformLabel } from './helpers/getSessionOrigin';
 
 import useCurrentOrPrev from '../../../hooks/useCurrentOrPrev';
 import useLang from '../../../hooks/useLang';
@@ -27,6 +31,12 @@ type OwnProps = {
 type StateProps = {
   session?: ApiSession;
 };
+
+const ORIGIN_LABEL_KEY_BY_ORIGIN = {
+  internal: 'SessionOriginInternal',
+  official: 'SessionOriginOfficial',
+  thirdParty: undefined,
+} as const satisfies Record<SessionOrigin, RegularLangKey | undefined>;
 
 const SettingsActiveSession: FC<OwnProps & StateProps> = ({
   isOpen, session, onClose,
@@ -76,6 +86,7 @@ const SettingsActiveSession: FC<OwnProps & StateProps> = ({
   }
 
   const { icon, color } = DEVICE_BACKDROP[getSessionIcon(renderingSession)];
+  const originLabelKey = ORIGIN_LABEL_KEY_BY_ORIGIN[getSessionOrigin(renderingSession)];
 
   return (
     <Modal
@@ -100,13 +111,19 @@ const SettingsActiveSession: FC<OwnProps & StateProps> = ({
         <dd>
           {renderingSession?.appName}
           {' '}
-          {renderingSession?.appVersion}
+          {stripSessionPlatformLabel(renderingSession.appVersion)}
           ,
           {' '}
           {renderingSession?.platform}
           {' '}
           {renderingSession?.systemVersion}
         </dd>
+        {originLabelKey && (
+          <>
+            <dt>{lang('SessionPreviewOrigin')}</dt>
+            <dd>{lang(originLabelKey)}</dd>
+          </>
+        )}
         {renderingSession?.ip && (
           <>
             <dt>{lang('SessionPreviewIp')}</dt>
@@ -115,7 +132,7 @@ const SettingsActiveSession: FC<OwnProps & StateProps> = ({
         )}
 
         <dt>{lang('SessionPreviewLocation')}</dt>
-        <dd>{renderingSession && getLocation(renderingSession)}</dd>
+        <dd>{renderingSession && getSessionLocation(renderingSession)}</dd>
       </dl>
 
       <p className={styles.note}>{lang('SessionPreviewIpDesc')}</p>
@@ -149,10 +166,6 @@ const SettingsActiveSession: FC<OwnProps & StateProps> = ({
     </Modal>
   );
 };
-
-function getLocation(session: ApiSession) {
-  return [session.region, session.country].filter(Boolean).join(', ');
-}
 
 export default memo(withGlobal<OwnProps>((global, { hash }) => {
   return {

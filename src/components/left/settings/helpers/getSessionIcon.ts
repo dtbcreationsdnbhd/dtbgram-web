@@ -3,6 +3,8 @@ import type { IconName } from '../../../../types/icons';
 import type { DeviceType } from '../../../../types/icons/device';
 import type { IconBackdropColor } from '../../../gili/primitives/IconBackdrop';
 
+import { stripSessionPlatformLabel } from './getSessionOrigin';
+
 const WEB_CODE_NAME_REGEX = /\b(a|k)\b\s*$/;
 
 export const DEVICE_BACKDROP: Record<DeviceType, { icon: IconName; color: IconBackdropColor }> = {
@@ -21,7 +23,7 @@ export default function getSessionIcon(session: ApiSession): DeviceType {
   const platform = session.platform.toLowerCase();
   const device = session.deviceModel.toLowerCase();
   const systemVersion = session.systemVersion.toLowerCase();
-  const app = `${session.appName} ${session.appVersion}`.toLowerCase();
+  const app = `${session.appName} ${stripSessionPlatformLabel(session.appVersion)}`.toLowerCase();
 
   if (app.includes('web') || platform.includes('web')) {
     if (app.includes('webk')) {

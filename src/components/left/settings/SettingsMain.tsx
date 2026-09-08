@@ -225,6 +225,17 @@ const SettingsMain: FC<OwnProps & StateProps> = ({
             <span className="title">{lang('SessionsTitle')}</span>
             <span className="subtitle">{lang('SettingsSessionsDesc')}</span>
           </ListItem>
+
+          <ListItem
+            icon="devices-filled"
+            iconBg="green"
+            multiline
+            narrow
+            onClick={() => openSettingsScreen({ screen: SettingsScreens.DevicesOverview })}
+          >
+            <span className="title">{lang('DevicesOverviewTitle')}</span>
+            <span className="subtitle">{lang('DevicesOverviewDesc')}</span>
+          </ListItem>
         </Island>
 
         <Island>

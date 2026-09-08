@@ -383,6 +383,16 @@ export interface LangPair {
   'AuthSessionsCurrentSession': undefined;
   'TerminateAllSessions': undefined;
   'OtherSessions': undefined;
+  'SessionsFilterAll': undefined;
+  'SessionsFilterInternal': undefined;
+  'SessionsFilterExternal': undefined;
+  'SessionsFilterEmpty': undefined;
+  'SessionOriginInternal': undefined;
+  'SessionOriginOfficial': undefined;
+  'SessionPreviewOrigin': undefined;
+  'DevicesOverviewTitle': undefined;
+  'DevicesOverviewDesc': undefined;
+  'DevicesOverviewEmpty': undefined;
   'TerminateOldSessionHeader': undefined;
   'IfInactiveFor': undefined;
   'AreYouSureSessions': undefined;

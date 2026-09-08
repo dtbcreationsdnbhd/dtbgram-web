@@ -9,6 +9,8 @@ import type { GlobalState } from '../../../global/types';
 
 import { formatPastTimeShort } from '../../../util/dates/oldDateFormat';
 import getSessionIcon, { DEVICE_BACKDROP } from './helpers/getSessionIcon';
+import getSessionLocation from './helpers/getSessionLocation';
+import getSessionOrigin, { stripSessionPlatformLabel } from './helpers/getSessionOrigin';
 
 import useFlag from '../../../hooks/useFlag';
 import useHistoryBack from '../../../hooks/useHistoryBack';
@@ -19,6 +21,8 @@ import Island, { IslandTitle } from '../../gili/layout/Island';
 import ConfirmDialog from '../../ui/ConfirmDialog';
 import ListItem from '../../ui/ListItem';
 import RadioGroup from '../../ui/RadioGroup';
+import SquareTabList, { type TabWithProperties } from '../../ui/SquareTabList';
+import SessionOriginBadge from './SessionOriginBadge';
 import SettingsActiveSession from './SettingsActiveSession';
 
 import './SettingsActiveSessions.scss';
@@ -29,6 +33,9 @@ type OwnProps = {
 };
 
 type StateProps = GlobalState['activeSessions'];
+
+const SESSION_FILTERS = ['all', 'internal', 'external'] as const;
+const SESSION_FILTER_KEYS = ['SessionsFilterAll', 'SessionsFilterInternal', 'SessionsFilterExternal'] as const;
 
 const SettingsActiveSessions: FC<OwnProps & StateProps> = ({
   isActive,
@@ -48,6 +55,7 @@ const SettingsActiveSessions: FC<OwnProps & StateProps> = ({
   const [isConfirmTerminateAllDialogOpen, openConfirmTerminateAllDialog, closeConfirmTerminateAllDialog] = useFlag();
   const [openedSessionHash, setOpenedSessionHash] = useState<string | undefined>();
   const [isModalOpen, openModal, closeModal] = useFlag();
+  const [activeFilterIndex, setActiveFilterIndex] = useState(0);
 
   const autoTerminateValue = useMemo(() => {
     // https://github.com/DrKLO/Telegram/blob/96dce2c9aabc33b87db61d830aa087b6b03fe397/TMessagesProj/src/main/java/org/telegram/ui/SessionsActivity.java#L195
@@ -135,6 +143,23 @@ const SettingsActiveSessions: FC<OwnProps & StateProps> = ({
   }, [byHash, orderedHashes]);
   const hasOtherSessions = Boolean(otherSessionHashes.length);
 
+  const filterTabs = useMemo<TabWithProperties[]>(() => {
+    return SESSION_FILTER_KEYS.map((key) => ({ title: lang(key) }));
+  }, [lang]);
+
+  const filteredSessionHashes = useMemo(() => {
+    const activeFilter = SESSION_FILTERS[activeFilterIndex];
+    if (activeFilter === 'all') {
+      return otherSessionHashes;
+    }
+
+    const shouldBeInternal = activeFilter === 'internal';
+
+    return otherSessionHashes.filter((hash) => {
+      return (getSessionOrigin(byHash[hash]) === 'internal') === shouldBeInternal;
+    });
+  }, [activeFilterIndex, byHash, otherSessionHashes]);
+
   useHistoryBack({
     isActive,
     onBack: onReset,
@@ -160,19 +185,20 @@ const SettingsActiveSessions: FC<OwnProps & StateProps> = ({
               <span className="subtitle black tight">
                 {session.appName}
                 {' '}
-                {session.appVersion}
+                {stripSessionPlatformLabel(session.appVersion)}
                 ,
                 {' '}
                 {session.platform}
                 {' '}
                 {session.systemVersion}
+                <SessionOriginBadge session={session} />
               </span>
               <span className="subtitle">
                 {session.ip}
                 {' '}
                 -
                 {' '}
-                {getLocation(session)}
+                {getSessionLocation(session)}
               </span>
             </div>
           </ListItem>
@@ -199,8 +225,16 @@ const SettingsActiveSessions: FC<OwnProps & StateProps> = ({
         <IslandTitle dir={lang.isRtl ? 'rtl' : undefined}>
           {lang('OtherSessions')}
         </IslandTitle>
+        <SquareTabList
+          className="session-filter-tabs"
+          tabs={filterTabs}
+          activeTab={activeFilterIndex}
+          onSwitchTab={setActiveFilterIndex}
+        />
         <Island>
-          {sessionHashes.map(renderSession)}
+          {sessionHashes.length
+            ? sessionHashes.map(renderSession)
+            : <p className="session-filter-empty">{lang('SessionsFilterEmpty')}</p>}
         </Island>
       </>
     );
@@ -254,17 +288,18 @@ const SettingsActiveSessions: FC<OwnProps & StateProps> = ({
           <span className="subtitle black tight">
             {session.appName}
             {' '}
-            {session.appVersion}
+            {stripSessionPlatformLabel(session.appVersion)}
             ,
             {' '}
             {session.platform}
             {' '}
             {session.systemVersion}
+            <SessionOriginBadge session={session} />
           </span>
           <span className="subtitle">
             {session.ip}
             {' '}
-            {getLocation(session)}
+            {getSessionLocation(session)}
           </span>
         </div>
       </ListItem>
@@ -274,7 +309,7 @@ const SettingsActiveSessions: FC<OwnProps & StateProps> = ({
   return (
     <div className="settings-content custom-scroll SettingsActiveSessions">
       {currentSession && renderCurrentSession(currentSession)}
-      {hasOtherSessions && renderOtherSessions(otherSessionHashes)}
+      {hasOtherSessions && renderOtherSessions(filteredSessionHashes)}
       {renderAutoTerminate()}
       {hasOtherSessions && (
         <ConfirmDialog
@@ -291,10 +326,6 @@ const SettingsActiveSessions: FC<OwnProps & StateProps> = ({
     </div>
   );
 };
-
-function getLocation(session: ApiSession) {
-  return [session.region, session.country].filter(Boolean).join(', ');
-}
 
 export default memo(withGlobal<OwnProps>(
   (global): Complete<StateProps> => global.activeSessions as Complete<StateProps>,

@@ -1,7 +1,7 @@
 {
-    "name": "Telegram Web Beta",
-    "short_name": "Telegram Web Beta",
-    "description": "Telegram is a cloud-based mobile and desktop messaging app with a focus on security and speed.",
+    "name": "JustChat Staging",
+    "short_name": "JustChat Staging",
+    "description": "JustChat is a cloud-based mobile and desktop messaging app with a focus on security and speed.",
     "start_url": "./",
     "gcm_sender_id": "122867383838",
     "icons": [
