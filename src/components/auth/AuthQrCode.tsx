@@ -26,7 +26,7 @@ import useMultiaccountInfo from '../../hooks/useMultiaccountInfo';
 import Button from '../ui/Button';
 import Loading from '../ui/Loading';
 
-import justChatLogoPath from '../../assets/just-chat-logo.png';
+import kingdomAscendLogoPath from '../../assets/kingdom-ascend-logo.png';
 
 type StateProps = {
   auth: GlobalState['auth'];
@@ -193,7 +193,7 @@ const AuthCode = ({
                 style={`width: ${QR_SIZE}px; height: ${QR_SIZE}px`}
               />
               <img
-                src={justChatLogoPath}
+                src={kingdomAscendLogoPath}
                 alt=""
                 width={QR_PLANE_SIZE}
                 height={QR_PLANE_SIZE}

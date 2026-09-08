@@ -8,7 +8,7 @@ import type {
 
 export const APP_CODE_NAME = 'A';
 export const APP_ENV = import.meta.env.TG_APP_ENV;
-export const APP_NAME = import.meta.env.TG_APP_NAME || 'JustChat';
+export const APP_NAME = import.meta.env.TG_APP_NAME || 'Kingdom Ascend';
 // Appended to `appVersion` in `initConnection` so every authorization created here is recognizable in the active
 // sessions list. `docs/INTERNAL_SESSION_LABEL.md` describes the format shared with our Android, iOS and Desktop clients
 export const SESSION_LABEL_PREFIX = 'Internal';
@@ -40,7 +40,7 @@ export const DEBUG_ALERT_MSG = 'Shoot!\nSomething went wrong, please see the err
 export const DEBUG_GRAMJS = false;
 
 export const PAGE_TITLE = import.meta.env.TG_APP_TITLE;
-export const PAGE_TITLE_TAURI = 'JustChat';
+export const PAGE_TITLE_TAURI = 'Kingdom Ascend';
 export const INACTIVE_MARKER = '[Inactive]';
 export const TELEGRAM_API_ID = Number(import.meta.env.TG_TELEGRAM_API_ID);
 export const TELEGRAM_API_HASH = import.meta.env.TG_TELEGRAM_API_HASH;

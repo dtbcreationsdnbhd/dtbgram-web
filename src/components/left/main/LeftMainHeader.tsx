@@ -45,7 +45,7 @@ import StatusButton from './StatusButton';
 
 import './LeftMainHeader.scss';
 
-import justChatLogoPath from '../../../assets/just-chat-logo.png';
+import kingdomAscendLogoPath from '../../../assets/kingdom-ascend-logo.png';
 
 type OwnProps = {
   shouldHideSearch?: boolean;
@@ -258,7 +258,7 @@ const LeftMainHeader = ({
       >
         <div className="LeftMainHeader-brandMark">
           <img
-            src={justChatLogoPath}
+            src={kingdomAscendLogoPath}
             alt=""
             className="LeftMainHeader-brandIcon"
             width={32}

@@ -23,10 +23,10 @@ import appStyles from '../App.module.scss';
 import styles from './UiLoader.module.scss';
 
 import starIconPath from '../../assets/icons/star/star.webp';
+import kingdomAscendLogoPath from '../../assets/kingdom-ascend-logo.png';
 import lockPreviewPath from '../../assets/lock.png';
 import monkeyPath from '../../assets/monkey.svg';
 import spoilerMaskPath from '../../assets/spoilers/mask.svg';
-import justChatLogoPath from '../../assets/just-chat-logo.png';
 
 export type UiLoaderPage =
   'main'
@@ -96,7 +96,7 @@ const preloadTasks = {
   ]),
   authPhoneNumber: () => Promise.all([
     preloadFonts(),
-    preloadImage(justChatLogoPath),
+    preloadImage(kingdomAscendLogoPath),
   ]),
   authCode: () => preloadImage(monkeyPath),
   authPassword: () => preloadImage(monkeyPath),
