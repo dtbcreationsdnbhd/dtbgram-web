@@ -172,6 +172,8 @@ const SettingsHeader: FC<OwnProps> = ({
 
       case SettingsScreens.ActiveSessions:
         return <h3>{oldLang('SessionsTitle')}</h3>;
+      case SettingsScreens.DevicesOverview:
+        return <h3>{lang('DevicesOverviewTitle')}</h3>;
       case SettingsScreens.ActiveWebsites:
         return <h3>{oldLang('OtherWebSessions')}</h3>;
       case SettingsScreens.PrivacyBlockedUsers:

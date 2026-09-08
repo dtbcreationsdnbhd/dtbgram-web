@@ -6,6 +6,8 @@ import type { ApiSession } from '../../../api/types';
 
 import { formatDateTimeToString } from '../../../util/dates/oldDateFormat';
 import getSessionIcon, { DEVICE_BACKDROP } from './helpers/getSessionIcon';
+import getSessionLocation from './helpers/getSessionLocation';
+import getSessionOrigin, { stripSessionPlatformLabel } from './helpers/getSessionOrigin';
 
 import useCurrentOrPrev from '../../../hooks/useCurrentOrPrev';
 import useLang from '../../../hooks/useLang';
@@ -15,6 +17,7 @@ import Switch from '../../gili/primitives/Switch';
 import Button from '../../ui/Button';
 import ListItem from '../../ui/ListItem';
 import Modal from '../../ui/Modal';
+import SessionOriginBadge from './SessionOriginBadge';
 
 import styles from './SettingsActiveSession.module.scss';
 
@@ -76,6 +79,7 @@ const SettingsActiveSession: FC<OwnProps & StateProps> = ({
   }
 
   const { icon, color } = DEVICE_BACKDROP[getSessionIcon(renderingSession)];
+  const hasKnownOrigin = getSessionOrigin(renderingSession) !== 'thirdParty';
 
   return (
     <Modal
@@ -100,13 +104,21 @@ const SettingsActiveSession: FC<OwnProps & StateProps> = ({
         <dd>
           {renderingSession?.appName}
           {' '}
-          {renderingSession?.appVersion}
+          {stripSessionPlatformLabel(renderingSession.appVersion)}
           ,
           {' '}
           {renderingSession?.platform}
           {' '}
           {renderingSession?.systemVersion}
         </dd>
+        {hasKnownOrigin && (
+          <>
+            <dt>{lang('SessionPreviewOrigin')}</dt>
+            <dd>
+              <SessionOriginBadge session={renderingSession} className={styles.originBadge} />
+            </dd>
+          </>
+        )}
         {renderingSession?.ip && (
           <>
             <dt>{lang('SessionPreviewIp')}</dt>
@@ -115,7 +127,7 @@ const SettingsActiveSession: FC<OwnProps & StateProps> = ({
         )}
 
         <dt>{lang('SessionPreviewLocation')}</dt>
-        <dd>{renderingSession && getLocation(renderingSession)}</dd>
+        <dd>{renderingSession && getSessionLocation(renderingSession)}</dd>
       </dl>
 
       <p className={styles.note}>{lang('SessionPreviewIpDesc')}</p>
@@ -149,10 +161,6 @@ const SettingsActiveSession: FC<OwnProps & StateProps> = ({
     </Modal>
   );
 };
-
-function getLocation(session: ApiSession) {
-  return [session.region, session.country].filter(Boolean).join(', ');
-}
 
 export default memo(withGlobal<OwnProps>((global, { hash }) => {
   return {

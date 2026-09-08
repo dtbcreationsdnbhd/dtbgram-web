@@ -383,6 +383,15 @@ export interface LangPair {
   'AuthSessionsCurrentSession': undefined;
   'TerminateAllSessions': undefined;
   'OtherSessions': undefined;
+  'SessionsFilterAll': undefined;
+  'SessionsFilterInternal': undefined;
+  'SessionsFilterExternal': undefined;
+  'SessionsFilterEmpty': undefined;
+  'SessionOriginOfficial': undefined;
+  'SessionPreviewOrigin': undefined;
+  'DevicesOverviewTitle': undefined;
+  'DevicesOverviewDesc': undefined;
+  'DevicesOverviewEmpty': undefined;
   'TerminateOldSessionHeader': undefined;
   'IfInactiveFor': undefined;
   'AreYouSureSessions': undefined;
@@ -2492,6 +2501,9 @@ export interface LangPairWithVariables<V = LangVariable> {
   };
   'ConversationPinMessagesFor': {
     'user': V;
+  };
+  'SessionOriginInternalClient': {
+    'client': V;
   };
   'AutodownloadSizeLimitUpTo': {
     'limit': V;

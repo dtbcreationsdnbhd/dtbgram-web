@@ -1,0 +1,2 @@
+import{u as e}from"./teact-CUauz5nS.js";import{o as t,v_ as n,ym as r}from"./InputText-emTbSlqg.js";var i=`C:/work/dtbgram-web/src/components/ui/Loading.tsx`,a=e(({color:e=`blue`,backgroundColor:a,className:o,onClick:s})=>n(`div`,{className:r(`Loading`,s&&`interactive`,o),onClick:s,children:n(t,{color:e,backgroundColor:a},void 0,!1,{fileName:i,lineNumber:21,columnNumber:7},void 0)},void 0,!1,{fileName:i,lineNumber:20,columnNumber:5},void 0));export{a as t};
+//# sourceMappingURL=Loading-O167tHKV.js.map

@@ -446,6 +446,16 @@
 "AuthSessionsCurrentSession" = "THIS DEVICE";
 "TerminateAllSessions" = "Terminate All Other Sessions";
 "OtherSessions" = "Active sessions";
+"SessionsFilterAll" = "All";
+"SessionsFilterInternal" = "Internal Platform";
+"SessionsFilterExternal" = "Other Apps";
+"SessionsFilterEmpty" = "No sessions match this filter.";
+"SessionOriginInternalClient" = "Internal {client}";
+"SessionOriginOfficial" = "Official App";
+"SessionPreviewOrigin" = "Logged in via";
+"DevicesOverviewTitle" = "Device Overview";
+"DevicesOverviewDesc" = "Sessions grouped by where they signed in";
+"DevicesOverviewEmpty" = "No devices in this group.";
 "TerminateOldSessionHeader" = "Automatically terminate old sessions";
 "IfInactiveFor" = "If inactive for";
 "AreYouSureSessions" = "Are you sure you want to terminate all other sessions?";

@@ -2,4 +2,15 @@
   .icon-stop {
     margin-inline: 0.25rem 1.5rem !important;
   }
+
+  .session-filter-tabs {
+    margin-bottom: 0.5rem;
+  }
+
+  .session-filter-empty {
+    margin: 0;
+    padding: 1rem;
+    color: var(--color-text-secondary);
+    text-align: center;
+  }
 }

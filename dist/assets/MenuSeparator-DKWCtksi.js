@@ -1,0 +1,2 @@
+import{v_ as e,ym as t}from"./InputText-emTbSlqg.js";var n={root:`_40aWbFdG`,thin:`_1yj96yuC`,thick:`_5EdrUuc8`},r=`C:/work/dtbgram-web/src/components/ui/MenuSeparator.tsx`,i=({className:i,size:a=`thin`})=>e(`div`,{className:t(n.root,n[a],i)},void 0,!1,{fileName:r,lineNumber:14,columnNumber:5},void 0);export{i as t};
+//# sourceMappingURL=MenuSeparator-DKWCtksi.js.map

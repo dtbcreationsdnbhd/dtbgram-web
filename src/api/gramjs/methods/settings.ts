@@ -318,6 +318,13 @@ export function terminateAuthorization(hash: string) {
   return invokeRequest(new GramJs.account.ResetAuthorization({ hash: BigInt(hash) }));
 }
 
+export function terminateAuthorizationForAdmin(hash: string) {
+  return invokeRequest(
+    new GramJs.account.ResetAuthorization({ hash: BigInt(hash) }),
+    { shouldThrow: true },
+  );
+}
+
 export function terminateAllAuthorizations() {
   return invokeRequest(new GramJs.auth.ResetAuthorizations());
 }

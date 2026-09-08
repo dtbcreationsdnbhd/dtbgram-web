@@ -9,6 +9,10 @@ import type {
 export const APP_CODE_NAME = 'A';
 export const APP_ENV = import.meta.env.TG_APP_ENV;
 export const APP_NAME = import.meta.env.TG_APP_NAME || 'JustChat';
+// Appended to `appVersion` in `initConnection` so every authorization created here is recognizable in the active
+// sessions list. `docs/INTERNAL_SESSION_LABEL.md` describes the format shared with our Android, iOS and Desktop clients
+export const SESSION_LABEL_PREFIX = 'Internal';
+export const SESSION_LABEL_CLIENT = 'Web';
 
 export const PRODUCTION_HOSTNAME = 'web.telegram.org';
 export const PRODUCTION_URL = 'https://web.telegram.org/a';
