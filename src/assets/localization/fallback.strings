@@ -450,7 +450,7 @@
 "SessionsFilterInternal" = "Internal Platform";
 "SessionsFilterExternal" = "Other Apps";
 "SessionsFilterEmpty" = "No sessions match this filter.";
-"SessionOriginInternal" = "Internal Platform";
+"SessionOriginInternalClient" = "Internal {client}";
 "SessionOriginOfficial" = "Official App";
 "SessionPreviewOrigin" = "Logged in via";
 "DevicesOverviewTitle" = "Device Overview";

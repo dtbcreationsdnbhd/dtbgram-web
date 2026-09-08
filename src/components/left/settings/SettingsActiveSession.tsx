@@ -3,8 +3,6 @@ import { memo, useCallback } from '../../../lib/teact/teact';
 import { getActions, withGlobal } from '../../../global';
 
 import type { ApiSession } from '../../../api/types';
-import type { RegularLangKey } from '../../../types/language';
-import type { SessionOrigin } from './helpers/getSessionOrigin';
 
 import { formatDateTimeToString } from '../../../util/dates/oldDateFormat';
 import getSessionIcon, { DEVICE_BACKDROP } from './helpers/getSessionIcon';
@@ -19,6 +17,7 @@ import Switch from '../../gili/primitives/Switch';
 import Button from '../../ui/Button';
 import ListItem from '../../ui/ListItem';
 import Modal from '../../ui/Modal';
+import SessionOriginBadge from './SessionOriginBadge';
 
 import styles from './SettingsActiveSession.module.scss';
 
@@ -31,12 +30,6 @@ type OwnProps = {
 type StateProps = {
   session?: ApiSession;
 };
-
-const ORIGIN_LABEL_KEY_BY_ORIGIN = {
-  internal: 'SessionOriginInternal',
-  official: 'SessionOriginOfficial',
-  thirdParty: undefined,
-} as const satisfies Record<SessionOrigin, RegularLangKey | undefined>;
 
 const SettingsActiveSession: FC<OwnProps & StateProps> = ({
   isOpen, session, onClose,
@@ -86,7 +79,7 @@ const SettingsActiveSession: FC<OwnProps & StateProps> = ({
   }
 
   const { icon, color } = DEVICE_BACKDROP[getSessionIcon(renderingSession)];
-  const originLabelKey = ORIGIN_LABEL_KEY_BY_ORIGIN[getSessionOrigin(renderingSession)];
+  const hasKnownOrigin = getSessionOrigin(renderingSession) !== 'thirdParty';
 
   return (
     <Modal
@@ -118,10 +111,12 @@ const SettingsActiveSession: FC<OwnProps & StateProps> = ({
           {' '}
           {renderingSession?.systemVersion}
         </dd>
-        {originLabelKey && (
+        {hasKnownOrigin && (
           <>
             <dt>{lang('SessionPreviewOrigin')}</dt>
-            <dd>{lang(originLabelKey)}</dd>
+            <dd>
+              <SessionOriginBadge session={renderingSession} className={styles.originBadge} />
+            </dd>
           </>
         )}
         {renderingSession?.ip && (

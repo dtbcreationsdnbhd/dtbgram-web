@@ -387,7 +387,6 @@ export interface LangPair {
   'SessionsFilterInternal': undefined;
   'SessionsFilterExternal': undefined;
   'SessionsFilterEmpty': undefined;
-  'SessionOriginInternal': undefined;
   'SessionOriginOfficial': undefined;
   'SessionPreviewOrigin': undefined;
   'DevicesOverviewTitle': undefined;
@@ -2502,6 +2501,9 @@ export interface LangPairWithVariables<V = LangVariable> {
   };
   'ConversationPinMessagesFor': {
     'user': V;
+  };
+  'SessionOriginInternalClient': {
+    'client': V;
   };
   'AutodownloadSizeLimitUpTo': {
     'limit': V;

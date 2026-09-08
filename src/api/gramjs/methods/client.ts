@@ -19,7 +19,7 @@ import type {
 
 import {
   APP_CODE_NAME,
-  DEBUG, DEBUG_GRAMJS, IS_TEST, LANG_PACK, SESSION_PLATFORM_LABEL,
+  DEBUG, DEBUG_GRAMJS, IS_TEST, LANG_PACK, SESSION_LABEL_CLIENT, SESSION_LABEL_PREFIX,
   TELEGRAM_API_HASH, TELEGRAM_API_ID, UPLOAD_WORKERS,
 } from '../../../config';
 import { pause } from '../../../util/schedulers';
@@ -112,7 +112,7 @@ export async function init(initialArgs: ApiInitialArgs, onConnected?: NoneToVoid
     {
       deviceModel: navigator.userAgent || userAgent || DEFAULT_USER_AGENT,
       systemVersion: platform || DEFAULT_PLATFORM,
-      appVersion: `${APP_VERSION} ${APP_CODE_NAME} (${SESSION_PLATFORM_LABEL})`,
+      appVersion: `${APP_VERSION} ${APP_CODE_NAME} (${SESSION_LABEL_PREFIX}: ${SESSION_LABEL_CLIENT})`,
       useWSS: true,
       additionalDcsDisabled: IS_TEST,
       shouldDebugExportedSenders,
