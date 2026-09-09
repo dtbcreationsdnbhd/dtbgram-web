@@ -111,6 +111,10 @@ export function buildApiPeerSettings({
   };
 }
 
+export function canExposeUserIdentity(user?: { self?: boolean; bot?: boolean }) {
+  return Boolean(user?.self || user?.bot);
+}
+
 export function buildApiUser(mtpUser: GramJs.TypeUser): ApiUser | undefined {
   if (!(mtpUser instanceof GramJs.User)) {
     return undefined;
@@ -146,11 +150,11 @@ export function buildApiUser(mtpUser: GramJs.TypeUser): ApiUser | undefined {
     hasMainMiniApp: Boolean(mtpUser.botHasMainApp),
     canEditBot: botCanEdit,
     ...(userType === 'userTypeBot' && { canBeInvitedToGroup: !mtpUser.botNochats }),
-    // Other users' usernames are hidden in this client; `hasUsername` still reflects the real state
-    usernames: mtpUser.self ? usernames : undefined,
+    // Other users' usernames are hidden; bots keep them for search and mentions
+    usernames: canExposeUserIdentity(mtpUser) ? usernames : undefined,
     hasUsername,
-    // Other users' phone numbers are hidden in this client
-    phoneNumber: mtpUser.self ? (mtpUser.phone || '') : '',
+    // Other users' phone numbers are hidden; bots keep theirs if present
+    phoneNumber: canExposeUserIdentity(mtpUser) ? (mtpUser.phone || '') : '',
     noStatus: !mtpUser.status,
     ...(mtpUser.accessHash && { accessHash: String(mtpUser.accessHash) }),
     avatarPhotoId,

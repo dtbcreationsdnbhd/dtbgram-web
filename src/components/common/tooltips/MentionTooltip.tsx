@@ -3,6 +3,7 @@ import { getGlobal } from '../../../global';
 
 import type { ApiUser } from '../../../api/types';
 
+import { isUserBot } from '../../../global/helpers';
 import buildClassName from '../../../util/buildClassName';
 
 import useFrozenProps from '../../../hooks/useFrozenProps';
@@ -62,18 +63,18 @@ const MentionTooltip = ({ isOpen, ...props }: OwnProps) => {
         ref={containerRef}
         className={buildClassName(sharedStyles.root, styles.root, 'composer-tooltip custom-scroll')}
       >
-        {filteredUsers.map(({ id }, index) => (
+        {filteredUsers.map((user, index) => (
           <ListItem
-            key={id}
+            key={user.id}
             className="chat-item-clickable scroll-item smaller-icon"
             onClick={handleClick}
-            clickArg={id}
+            clickArg={user.id}
             focus={selectedIndex === index}
           >
             <PrivateChatInfo
-              userId={id}
+              userId={user.id}
               avatarSize="small"
-              withUsername
+              withUsername={isUserBot(user)}
               noUserStatus
             />
           </ListItem>

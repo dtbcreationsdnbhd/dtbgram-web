@@ -48,6 +48,7 @@ import {
   isMtpPeerUser,
 } from './peers';
 import { buildApiReaction } from './reactions';
+import { canExposeUserIdentity } from './users';
 
 type PeerEntityApiChatFields = Omit<ApiChat, (
   'id' | 'type' | 'title' |
@@ -103,8 +104,8 @@ function buildApiChatFieldsFromPeerEntity(
     isLinkedInDiscussion: channel?.hasLink,
     areSignaturesShown: channel?.signatures,
     areProfilesShown: channel?.signatureProfiles,
-    // Other users' usernames are hidden in this client; group and channel usernames stay visible
-    usernames: user && !user.self ? undefined : usernames,
+    // Other users' usernames are hidden; bots, groups and channels keep theirs
+    usernames: user && !canExposeUserIdentity(user) ? undefined : usernames,
     accessHash,
     hasVideoAvatar,
     avatarPhotoId,
