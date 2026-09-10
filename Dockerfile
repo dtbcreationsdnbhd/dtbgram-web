@@ -32,6 +32,9 @@ ARG APP_ENV=production
 ARG PLATFORM_API_ORIGIN=
 ARG PLATFORM_API_KEY_WEBSITE=
 
+# Lock-page password (baked into the client bundle at build time)
+ARG APP_LOCK_PASSWORD=
+
 # Optional git branch override for APP_REVISION
 ARG HEAD=
 
@@ -41,6 +44,7 @@ ENV TELEGRAM_API_ID=$TELEGRAM_API_ID \
     APP_ENV=$APP_ENV \
     PLATFORM_API_ORIGIN=$PLATFORM_API_ORIGIN \
     PLATFORM_API_KEY_WEBSITE=$PLATFORM_API_KEY_WEBSITE \
+    APP_LOCK_PASSWORD=$APP_LOCK_PASSWORD \
     HEAD=$HEAD \
     NODE_ENV=production
 
