@@ -80,6 +80,7 @@ import { buildApiEmojiInteraction, buildStickerSet } from '../apiBuilders/symbol
 import {
   buildApiPeerSettings,
   buildApiUserStatus,
+  canExposeUserIdentity,
 } from '../apiBuilders/users';
 import {
   buildChatPhotoForLocalDb,
@@ -887,8 +888,8 @@ export function updater(update: Update) {
       ? pick(update, [])
       : pick(update, ['firstName', 'lastName']);
 
-    // Other users' usernames are hidden in this client
-    const usernames = updatedUser?.self ? buildApiUsernames(update) : undefined;
+    // Other users' usernames are hidden; bots keep them for search and mentions
+    const usernames = canExposeUserIdentity(updatedUser) ? buildApiUsernames(update) : undefined;
 
     sendApiUpdate({
       '@type': 'updateUser',
@@ -902,8 +903,8 @@ export function updater(update: Update) {
     const { userId, phone } = update;
     const apiUserId = buildApiPeerId(userId, 'user');
 
-    // Other users' phone numbers are hidden in this client
-    const phoneNumber = localDb.users[apiUserId]?.self ? phone : '';
+    // Other users' phone numbers are hidden; bots keep theirs if present
+    const phoneNumber = canExposeUserIdentity(localDb.users[apiUserId]) ? phone : '';
 
     sendApiUpdate({
       '@type': 'updateUser',
