@@ -22,6 +22,7 @@ import {
   setCompanyOtpVerified,
 } from '../../../util/companyOtpStorage';
 import { getCurrentTabId } from '../../../util/establishMultitabRole';
+import getSessionLabelClient, { getSessionDeviceModel } from '../../../util/getSessionLabelClient';
 import {
   ACCOUNT_SLOT, getAccountsInfo, getAccountSlotUrl, getFirstLoggedInAccountSlot,
 } from '../../../util/multiaccount';
@@ -84,6 +85,8 @@ addActionHandler('initApi', (global, actions): ActionReturnType => {
   void initApi(actions.apiUpdate, {
     userAgent: navigator.userAgent,
     platform: PLATFORM_ENV,
+    sessionLabelClient: getSessionLabelClient(),
+    sessionDeviceModel: getSessionDeviceModel(),
     sessionData: loadStoredSession(),
     isWebmSupported: IS_WEBM_SUPPORTED,
     maxBufferSize: MAX_BUFFER_SIZE,

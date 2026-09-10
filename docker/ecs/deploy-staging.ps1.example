@@ -1,0 +1,25 @@
+# Staging deploy (branch: staging)
+# Domain: https://monoverse.biz/
+# Service: dtbgram-web-staging  |  Image tag: :staging
+
+cd C:\work\dtbgram-web
+git checkout staging
+git pull
+
+aws ecr get-login-password --region ap-southeast-1 | docker login --username AWS --password-stdin 277715911124.dkr.ecr.ap-southeast-1.amazonaws.com
+
+docker build -t dtbgram-web:staging `
+  --build-arg TELEGRAM_API_ID=<id> `
+  --build-arg TELEGRAM_API_HASH=<hash> `
+  --build-arg BASE_URL=https://monoverse.biz/ `
+  --build-arg APP_ENV=staging `
+  --build-arg HEAD=staging `
+  --build-arg PLATFORM_API_KEY_WEBSITE=<key> `
+  --build-arg PLATFORM_API_ORIGIN=https://main.dhfko7aevmlgq.amplifyapp.com `
+  .
+
+docker tag dtbgram-web:staging 277715911124.dkr.ecr.ap-southeast-1.amazonaws.com/dtbgram-web:staging
+docker push 277715911124.dkr.ecr.ap-southeast-1.amazonaws.com/dtbgram-web:staging
+
+aws ecs update-service --cluster dtbgram --service dtbgram-web-staging --force-new-deployment --region ap-southeast-1
+aws ecs wait services-stable --cluster dtbgram --services dtbgram-web-staging --region ap-southeast-1

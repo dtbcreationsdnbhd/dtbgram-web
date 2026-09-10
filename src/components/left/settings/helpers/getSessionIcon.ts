@@ -3,7 +3,7 @@ import type { IconName } from '../../../../types/icons';
 import type { DeviceType } from '../../../../types/icons/device';
 import type { IconBackdropColor } from '../../../gili/primitives/IconBackdrop';
 
-import { stripSessionPlatformLabel } from './getSessionOrigin';
+import { getSessionInternalClient, stripSessionPlatformLabel } from './getSessionOrigin';
 
 const WEB_CODE_NAME_REGEX = /\b(a|k)\b\s*$/;
 
@@ -24,8 +24,12 @@ export default function getSessionIcon(session: ApiSession): DeviceType {
   const device = session.deviceModel.toLowerCase();
   const systemVersion = session.systemVersion.toLowerCase();
   const app = `${session.appName} ${stripSessionPlatformLabel(session.appVersion)}`.toLowerCase();
+  const internalClient = getSessionInternalClient(session)?.toLowerCase();
 
-  if (app.includes('web') || platform.includes('web')) {
+  if (internalClient) {
+    if (internalClient.includes('android')) return 'android';
+    if (internalClient.includes('ios')) return 'apple';
+  } else if (app.includes('web') || platform.includes('web')) {
     if (app.includes('webk')) {
       return 'webk';
     }
@@ -44,7 +48,7 @@ export default function getSessionIcon(session: ApiSession): DeviceType {
     return 'web';
   }
 
-  if (platform.includes('android') || systemVersion.includes('android')) {
+  if (!internalClient && (platform.includes('android') || systemVersion.includes('android'))) {
     return 'android';
   }
   if (
