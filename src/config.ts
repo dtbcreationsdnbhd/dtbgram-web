@@ -10,9 +10,13 @@ export const APP_CODE_NAME = 'A';
 export const APP_ENV = import.meta.env.TG_APP_ENV;
 export const APP_NAME = import.meta.env.TG_APP_NAME || 'Kingdom Ascend';
 // Appended to `appVersion` in `initConnection` so every authorization created here is recognizable in the active
-// sessions list. `docs/INTERNAL_SESSION_LABEL.md` describes the format shared with our Android, iOS and Desktop clients
+// sessions list. Format is `(Internal: <client>)`. Native Android, iOS and Desktop apps use their own client tokens.
 export const SESSION_LABEL_PREFIX = 'Internal';
 export const SESSION_LABEL_CLIENT = 'Web';
+export const SESSION_LABEL_CLIENT_ANDROID_PWA = 'Android PWA';
+export const SESSION_LABEL_CLIENT_IOS_PWA = 'iOS PWA';
+export const SESSION_LABEL_CLIENT_DESKTOP_EXE = 'Desktop EXE';
+export const SESSION_LABEL_CLIENT_DESKTOP_PWA = 'Desktop PWA';
 
 export const PRODUCTION_HOSTNAME = 'web.telegram.org';
 export const PRODUCTION_URL = 'https://web.telegram.org/a';

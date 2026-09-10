@@ -96,7 +96,7 @@ export async function init(initialArgs: ApiInitialArgs, onConnected?: NoneToVoid
     userAgent, platform, sessionData, isWebmSupported, maxBufferSize, webAuthToken, dcId,
     mockScenario, shouldForceHttpTransport, shouldAllowHttpTransport,
     shouldDebugExportedSenders, langCode, isTestServerRequested, accountIds,
-    hasPasskeySupport,
+    hasPasskeySupport, sessionLabelClient, sessionDeviceModel,
   } = initialArgs;
 
   const session = new sessions.CallbackSession(sessionData, onSessionUpdate);
@@ -105,14 +105,16 @@ export async function init(initialArgs: ApiInitialArgs, onConnected?: NoneToVoid
 
   (self as any).maxBufferSize = maxBufferSize;
 
+  const labelClient = sessionLabelClient || SESSION_LABEL_CLIENT;
+
   client = new TelegramClient(
     session,
     TELEGRAM_API_ID,
     TELEGRAM_API_HASH,
     {
-      deviceModel: navigator.userAgent || userAgent || DEFAULT_USER_AGENT,
+      deviceModel: sessionDeviceModel || userAgent || navigator.userAgent || DEFAULT_USER_AGENT,
       systemVersion: platform || DEFAULT_PLATFORM,
-      appVersion: `${APP_VERSION} ${APP_CODE_NAME} (${SESSION_LABEL_PREFIX}: ${SESSION_LABEL_CLIENT})`,
+      appVersion: `${APP_VERSION} ${APP_CODE_NAME} (${SESSION_LABEL_PREFIX}: ${labelClient})`,
       useWSS: true,
       additionalDcsDisabled: IS_TEST,
       shouldDebugExportedSenders,

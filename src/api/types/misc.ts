@@ -18,6 +18,8 @@ import type { ApiUser } from './users';
 export interface ApiInitialArgs {
   userAgent: string;
   platform?: string;
+  sessionLabelClient?: string;
+  sessionDeviceModel?: string;
   sessionData?: ApiSessionData;
   isTest?: boolean;
   isWebmSupported?: boolean;

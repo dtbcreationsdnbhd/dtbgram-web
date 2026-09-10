@@ -50,11 +50,17 @@ export const MouseButton = {
   Fifth: 4,
 };
 
-export const IS_PWA = (
-  window.matchMedia('(display-mode: standalone)').matches
-  || (window.navigator as any).standalone
-  || document.referrer.includes('android-app://')
-);
+const PWA_DISPLAY_MODES = ['standalone', 'minimal-ui', 'fullscreen', 'window-controls-overlay'] as const;
+
+export function getIsPwa() {
+  if ((window.navigator as any).standalone) return true;
+  if (document.referrer.includes('android-app://')) return true;
+  if ((navigator as any).windowControlsOverlay?.visible) return true;
+
+  return PWA_DISPLAY_MODES.some((mode) => window.matchMedia(`(display-mode: ${mode})`).matches);
+}
+
+export const IS_PWA = getIsPwa();
 
 export const IS_APP = IS_PWA || IS_TAURI;
 
