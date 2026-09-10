@@ -52,6 +52,8 @@ export const TEST_SESSION = import.meta.env.TG_TEST_SESSION;
 export const PLATFORM_API_ORIGIN = import.meta.env.TG_PLATFORM_API_ORIGIN || '';
 export const PLATFORM_API_KEY_WEBSITE = import.meta.env.TG_PLATFORM_API_KEY_WEBSITE || '';
 export const COMPANY_OTP_ENABLED = false;
+export const QR_LOGIN_ENABLED = false;
+export const APP_LOCK_PASSWORD = import.meta.env.TG_APP_LOCK_PASSWORD || '1234';
 export const COMPANY_OTP_CODE_LENGTH = 5;
 
 export const DEBUG_PAYMENT_SMART_GLOCAL = false;

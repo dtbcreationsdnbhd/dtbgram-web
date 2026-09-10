@@ -19,7 +19,7 @@ import type {
 
 import {
   APP_CODE_NAME,
-  DEBUG, DEBUG_GRAMJS, IS_TEST, LANG_PACK, SESSION_LABEL_CLIENT, SESSION_LABEL_PREFIX,
+  DEBUG, DEBUG_GRAMJS, IS_TEST, LANG_PACK, QR_LOGIN_ENABLED, SESSION_LABEL_CLIENT, SESSION_LABEL_PREFIX,
   TELEGRAM_API_HASH, TELEGRAM_API_ID, UPLOAD_WORKERS,
 } from '../../../config';
 import { pause } from '../../../util/schedulers';
@@ -149,7 +149,7 @@ export async function init(initialArgs: ApiInitialArgs, onConnected?: NoneToVoid
         onPasskeyOption,
         qrCode: onRequestQrCode,
         onError: onAuthError,
-        initialMethod: platform === 'iOS' || platform === 'Android' ? 'phoneNumber' : 'qrCode',
+        initialMethod: !QR_LOGIN_ENABLED || platform === 'iOS' || platform === 'Android' ? 'phoneNumber' : 'qrCode',
         shouldThrowIfUnauthorized: Object.values(sessionData?.keys || {}).length > 0,
         webAuthToken,
         webAuthTokenFailed: onWebAuthTokenFailed,

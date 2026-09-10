@@ -5,7 +5,7 @@ import { getActions, withGlobal } from '../../global';
 
 import type { GlobalState } from '../../global/types';
 
-import { COMPANY_OTP_ENABLED } from '../../config';
+import { COMPANY_OTP_ENABLED, QR_LOGIN_ENABLED } from '../../config';
 import { IS_TAURI } from '../../util/browser/globalEnvironment';
 import { IS_MAC_OS, PLATFORM_ENV } from '../../util/browser/windowEnvironment';
 
@@ -46,8 +46,10 @@ const Auth = ({
   };
 
   useHistoryBack({
-    isActive: (!isMobile && authState === 'authorizationStateWaitPhoneNumber')
-      || (isMobile && authState === 'authorizationStateWaitQrCode'),
+    isActive: QR_LOGIN_ENABLED && (
+      (!isMobile && authState === 'authorizationStateWaitPhoneNumber')
+      || (isMobile && authState === 'authorizationStateWaitQrCode')
+    ),
     onBack: handleChangeAuthorizationMethod,
   });
 
@@ -72,9 +74,9 @@ const Auth = ({
       case 'authorizationStateWaitPhoneNumber':
         return <AuthPhoneNumber />;
       case 'authorizationStateWaitQrCode':
-        return <AuthQrCode />;
+        return QR_LOGIN_ENABLED ? <AuthQrCode /> : <AuthPhoneNumber />;
       default:
-        return isMobile ? <AuthPhoneNumber /> : <AuthQrCode />;
+        return isMobile || !QR_LOGIN_ENABLED ? <AuthPhoneNumber /> : <AuthQrCode />;
     }
   }
 
@@ -93,9 +95,9 @@ const Auth = ({
       case 'authorizationStateWaitPhoneNumber':
         return 3;
       case 'authorizationStateWaitQrCode':
-        return 4;
+        return QR_LOGIN_ENABLED ? 4 : 3;
       default:
-        return isMobile ? 3 : 4;
+        return isMobile || !QR_LOGIN_ENABLED ? 3 : 4;
     }
   }
 

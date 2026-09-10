@@ -15,11 +15,15 @@ interface ImportMetaEnv {
   readonly TG_APP_NAME?: string;
   readonly TG_APP_TITLE: string;
   readonly TG_PUBLIC_URL: string;
+  readonly TG_APPLE_ICON: string;
+  readonly TG_MAIN_ICON: string;
+  readonly TG_MANIFEST: string;
   readonly TG_TELEGRAM_API_HASH?: string;
   readonly TG_TELEGRAM_API_ID?: string;
   readonly TG_TEST_SESSION?: string;
   readonly TG_PLATFORM_API_ORIGIN?: string;
   readonly TG_PLATFORM_API_KEY_WEBSITE?: string;
+  readonly TG_APP_LOCK_PASSWORD?: string;
 }
 
 declare namespace React {
