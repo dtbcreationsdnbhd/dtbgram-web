@@ -20,7 +20,8 @@ COPY . .
 ARG TELEGRAM_API_ID
 ARG TELEGRAM_API_HASH
 
-# Public site URL (used for TG_PUBLIC_URL / share links)
+# Public site URL (used for TG_PUBLIC_URL / share links).
+# For the staff-only host, pass the new domain here. Do not 301 the old public domain to it.
 ARG BASE_URL=https://web.telegram.org/a/
 
 # production | staging | development
