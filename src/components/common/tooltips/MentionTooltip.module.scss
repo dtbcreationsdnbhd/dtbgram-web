@@ -4,17 +4,17 @@
 
     :global(.info) {
       display: flex;
-      flex-direction: row;
-      justify-content: flex-start;
+      flex-direction: column;
+      justify-content: center;
     }
 
     :global(.title) {
-      max-width: 70%;
-      margin-inline-end: 0.625rem;
+      max-width: 100%;
+      margin-inline-end: 0;
     }
 
     :global(.handle) {
-      font-size: 1rem;
+      font-size: 0.875rem;
     }
 
     &[dir="rtl"] {
@@ -33,7 +33,13 @@
       margin-right: 0.7em;
     }
 
+    :global(.status) {
+      line-height: 1.25;
+    }
+
     :global(.handle) {
+      color: var(--color-text-secondary);
+
       &::before {
         content: "@";
       }
