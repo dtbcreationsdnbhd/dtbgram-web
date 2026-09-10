@@ -1,131 +1,76 @@
-import './util/handleError';
-import './util/setupServiceWorker';
-import './util/adminBridge';
-import './global/init';
-
 import TeactDOM from './lib/teact/teact-dom';
-import {
-  getActions, getGlobal,
-} from './global';
 
-import {
-  DEBUG, STRICTERDOM_ENABLED,
-} from './config';
-import { enableStrict, requestMutation } from './lib/fasterdom/fasterdom';
-import { selectChat, selectCurrentMessageList, selectPeerFullInfo, selectTabState } from './global/selectors';
-import { selectSharedSettings } from './global/selectors/sharedState';
-import { betterView } from './util/betterView';
-import { IS_TAURI } from './util/browser/globalEnvironment';
-import listenOtherClients from './util/browser/listenOtherClients';
-import { requestGlobal, subscribeToMultitabBroadcastChannel } from './util/browser/multitab';
-import { establishMultitabRole, subscribeToMasterChange } from './util/establishMultitabRole';
-import { initGlobal } from './util/init';
-import { initLocalization } from './util/localization';
-import { MULTITAB_STORAGE_KEY } from './util/multiaccount';
-import { checkAndAssignPermanentWebVersion } from './util/permanentWebVersion';
-import { onBeforeUnload } from './util/schedulers';
-import initTauriApi from './util/tauri/initTauriApi';
-import setupTauriListeners from './util/tauri/setupTauriListeners';
-import updateWebmanifest from './util/updateWebmanifest';
+import { requestMutation } from './lib/fasterdom/fasterdom';
 
-import App from './components/App';
+import AppLockGate from './components/main/AppLockGate';
 
-import './assets/fonts/roboto.css';
-import './styles/index.scss';
+const APP_LOCK_SESSION_KEY = 'app_lock_passed';
+const DISGUISE_TITLE = 'home';
+const FAVICON_SIZE = 64;
 
-if (STRICTERDOM_ENABLED) {
-  enableStrict();
-}
+bootstrap();
 
-if (IS_TAURI) {
-  initTauriApi();
-  setupTauriListeners();
-}
-
-init();
-
-async function init() {
-  if (DEBUG) {
-    // eslint-disable-next-line no-console
-    console.log('>>> INIT');
-  }
-
+function bootstrap() {
   if (!(window as any).isCompatTestPassed) return;
 
-  checkAndAssignPermanentWebVersion();
-  listenOtherClients();
-
-  subscribeToMultitabBroadcastChannel();
-  await requestGlobal(APP_VERSION);
-  localStorage.setItem(MULTITAB_STORAGE_KEY, '1');
-  onBeforeUnload(() => {
-    const global = getGlobal();
-    if (Object.keys(global.byTabId).length === 1) {
-      localStorage.removeItem(MULTITAB_STORAGE_KEY);
-    }
-  });
-
-  await initGlobal();
-  getActions().init();
-
-  getActions().updateShouldEnableDebugLog();
-  getActions().updateShouldDebugExportedSenders();
-
-  const global = getGlobal();
-
-  initLocalization(selectSharedSettings(global).language, true);
-
-  subscribeToMasterChange((isMasterTab) => {
-    getActions()
-      .switchMultitabRole({ isMasterTab }, { forceSyncOnIOs: true });
-  });
-  const shouldReestablishMasterToSelf = getGlobal().auth.state !== 'authorizationStateReady';
-  establishMultitabRole(shouldReestablishMasterToSelf);
-
-  if (DEBUG) {
-    // eslint-disable-next-line no-console
-    console.log('>>> START INITIAL RENDER');
+  if (sessionStorage.getItem(APP_LOCK_SESSION_KEY) === '1') {
+    void startMainApp();
+    return;
   }
+
+  disguiseTab();
 
   requestMutation(() => {
-    updateWebmanifest();
-
     TeactDOM.render(
-      <App />,
+      <AppLockGate onUnlock={handleAppUnlock} />,
       document.getElementById('root')!,
     );
-
-    betterView();
   });
-
-  if (DEBUG) {
-    // eslint-disable-next-line no-console
-    console.log('>>> FINISH INITIAL RENDER');
-  }
-
-  if (DEBUG) {
-    document.addEventListener('dblclick', () => {
-      const currentGlobal = getGlobal();
-      const currentMessageList = selectCurrentMessageList(currentGlobal);
-      // eslint-disable-next-line no-console
-      console.warn('TAB STATE', selectTabState(currentGlobal));
-      // eslint-disable-next-line no-console
-      console.warn('GLOBAL STATE', currentGlobal);
-      if (currentMessageList) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          'CURRENT MESSAGE LIST',
-          selectChat(currentGlobal, currentMessageList.chatId),
-          selectPeerFullInfo(currentGlobal, currentMessageList.chatId),
-          currentGlobal.messages.byChatId[currentMessageList.chatId],
-        );
-      }
-    });
-  }
 }
 
-onBeforeUnload(() => {
-  const actions = getActions();
-  actions.leaveGroupCall?.({ isPageUnload: true });
-  actions.hangUp?.({ isPageUnload: true });
-});
+function handleAppUnlock() {
+  sessionStorage.setItem(APP_LOCK_SESSION_KEY, '1');
+  void startMainApp();
+}
+
+// Loaded lazily so no app code, styles, fonts or icons hit the network while the lock page is shown
+async function startMainApp() {
+  const { default: startApp } = await import('./appBootstrap');
+  await startApp();
+}
+
+// Hides the real app identity behind a neutral title and a randomly generated favicon
+function disguiseTab() {
+  document.title = DISGUISE_TITLE;
+  document.body.style.margin = '0';
+
+  document.querySelectorAll('link[rel*="icon"], link[rel="manifest"]').forEach((el) => el.remove());
+
+  const link = document.createElement('link');
+  link.setAttribute('rel', 'icon');
+  link.setAttribute('data-app-lock-favicon', '');
+  link.setAttribute('href', generateRandomFavicon());
+  document.head.appendChild(link);
+}
+
+function generateRandomFavicon() {
+  const canvas = document.createElement('canvas');
+  canvas.width = FAVICON_SIZE;
+  canvas.height = FAVICON_SIZE;
+
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = getRandomColor();
+  ctx.fillRect(0, 0, FAVICON_SIZE, FAVICON_SIZE);
+
+  ctx.fillStyle = getRandomColor();
+  ctx.beginPath();
+  ctx.arc(FAVICON_SIZE / 2, FAVICON_SIZE / 2, FAVICON_SIZE / 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  return canvas.toDataURL('image/png');
+}
+
+function getRandomColor() {
+  const hue = Math.floor(Math.random() * 360);
+  return `hsl(${hue}, 65%, 55%)`;
+}
