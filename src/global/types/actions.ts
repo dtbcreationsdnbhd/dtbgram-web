@@ -608,6 +608,7 @@ export interface ActionPayloads {
   deleteHistory: {
     chatId: string;
     shouldDeleteForAll?: boolean;
+    shouldKeepChat?: boolean;
   } & WithTabId;
   deleteSavedHistory: {
     chatId: string;

@@ -273,6 +273,10 @@
   @include mixins.with-vt-type('profileAvatar');
 }
 
+.clickableStatus {
+  cursor: pointer;
+}
+
 .status,
 .info,
 .title {

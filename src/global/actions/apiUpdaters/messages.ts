@@ -961,7 +961,7 @@ addActionHandler('apiUpdate', (global, actions, update): ActionReturnType => {
     }
 
     case 'deleteHistory': {
-      const { chatId } = update;
+      const { chatId, shouldKeepChat } = update;
       const chatMessages = global.messages.byChatId[chatId];
       if (chatId === SERVICE_NOTIFICATIONS_USER_ID) {
         global = {
@@ -982,9 +982,11 @@ addActionHandler('apiUpdate', (global, actions, update): ActionReturnType => {
         actions.requestChatUpdate({ chatId });
       }
 
-      global = getGlobal();
-      global = removeChatFromChatLists(global, chatId);
-      setGlobal(global);
+      if (!shouldKeepChat) {
+        global = getGlobal();
+        global = removeChatFromChatLists(global, chatId);
+        setGlobal(global);
+      }
 
       break;
     }
