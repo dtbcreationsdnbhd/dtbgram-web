@@ -83,24 +83,24 @@ addActionHandler('initApi', (global, actions): ActionReturnType => {
     .filter(Boolean);
 
   void initApi(actions.apiUpdate, {
-    userAgent: navigator.userAgent,
-    platform: PLATFORM_ENV,
-    sessionLabelClient: getSessionLabelClient(),
-    sessionDeviceModel: getSessionDeviceModel(),
-    sessionData: loadStoredSession(),
-    isWebmSupported: IS_WEBM_SUPPORTED,
-    maxBufferSize: MAX_BUFFER_SIZE,
-    webAuthToken: initialLocationHash?.tgWebAuthToken,
-    dcId: initialLocationHash?.tgWebAuthDcId ? Number(initialLocationHash?.tgWebAuthDcId) : undefined,
-    mockScenario: initialLocationHash?.mockScenario,
-    shouldAllowHttpTransport,
-    shouldForceHttpTransport,
-    shouldDebugExportedSenders,
-    langCode: language,
-    isTestServerRequested: hasTestParam,
-    accountIds,
-    hasPasskeySupport: IS_WEBAUTHN_SUPPORTED,
-  });
+      userAgent: navigator.userAgent,
+      platform: PLATFORM_ENV,
+      sessionLabelClient: getSessionLabelClient(),
+      sessionDeviceModel: getSessionDeviceModel(),
+      sessionData: loadStoredSession(),
+      isWebmSupported: IS_WEBM_SUPPORTED,
+      maxBufferSize: MAX_BUFFER_SIZE,
+      webAuthToken: initialLocationHash?.tgWebAuthToken,
+      dcId: initialLocationHash?.tgWebAuthDcId ? Number(initialLocationHash?.tgWebAuthDcId) : undefined,
+      mockScenario: initialLocationHash?.mockScenario,
+      shouldAllowHttpTransport,
+      shouldForceHttpTransport,
+      shouldDebugExportedSenders,
+      langCode: language,
+      isTestServerRequested: hasTestParam,
+      accountIds,
+      hasPasskeySupport: IS_WEBAUTHN_SUPPORTED,
+    });
 
   void setShouldEnableDebugLog(Boolean(shouldCollectDebugLogs));
 });

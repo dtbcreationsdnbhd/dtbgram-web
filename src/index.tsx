@@ -3,15 +3,22 @@ import TeactDOM from './lib/teact/teact-dom';
 import { requestMutation } from './lib/fasterdom/fasterdom';
 
 import AppLockGate from './components/main/AppLockGate';
+import { enforceJustChatAccess } from './util/justChatAccess';
 
 const APP_LOCK_SESSION_KEY = 'app_lock_passed';
 const DISGUISE_TITLE = 'home';
 const FAVICON_SIZE = 64;
 
-bootstrap();
+void bootstrap();
 
-function bootstrap() {
+async function bootstrap() {
   if (!(window as any).isCompatTestPassed) return;
+
+  // Restricted users must leave before the PWA lock screen, including a cold tap of the app icon.
+  const access = await enforceJustChatAccess();
+  if (access === 'denied') {
+    return;
+  }
 
   if (sessionStorage.getItem(APP_LOCK_SESSION_KEY) === '1') {
     void startMainApp();
