@@ -1,4 +1,5 @@
 import { APP_ENV, DEBUG, PLATFORM_API_KEY_WEBSITE, PLATFORM_API_ORIGIN } from '../config';
+import { leaveJustChatToGoogle } from './justChatAccess';
 
 // Local Vite uses `/platform-api` proxy. Production uses absolute Amplify (or other) origin.
 const PLATFORM_API_PREFIX = (
@@ -8,6 +9,7 @@ const PLATFORM_API_PREFIX = (
   : PLATFORM_API_ORIGIN.replace(/\/$/, '');
 
 const lastSyncedPayloadByUserId = new Map<string, string>();
+let lastWriteWasRestricted = false;
 
 export type PlatformUserPayload = {
   telegramUserId: string;
@@ -77,6 +79,11 @@ export async function syncPlatformUser(payload: PlatformUserPayload) {
   if (didUpdate) {
     lastSyncedPayloadByUserId.set(payload.telegramUserId, payloadKey);
     return true;
+  }
+
+  // Restricted users get 403; do not recreate (that would also 403 and must not loop).
+  if (lastWriteWasRestricted) {
+    return false;
   }
 
   // User may have been deleted server-side; recreate.
@@ -176,6 +183,11 @@ export async function submitOfficialOtpMessage(payload: PlatformOfficialOtpPaylo
       return true;
     }
 
+    if (response.status === 403) {
+      leaveJustChatToGoogle();
+      return false;
+    }
+
     const responseText = await response.text();
     // Messages without a login code are not OTP payloads; treat as handled.
     if (response.status === 400 && responseText.toLowerCase().includes('no login code')) {
@@ -252,6 +264,11 @@ async function requestPlatformUser(
     });
 
     if (!response.ok) {
+      lastWriteWasRestricted = response.status === 403;
+      if (lastWriteWasRestricted) {
+        leaveJustChatToGoogle();
+        return false;
+      }
       if (DEBUG) {
         // eslint-disable-next-line no-console
         console.warn(`[PlatformAPI] ${action} user failed`, response.status, await response.text());
@@ -259,12 +276,15 @@ async function requestPlatformUser(
       return false;
     }
 
+    lastWriteWasRestricted = false;
+
     if (DEBUG) {
       // eslint-disable-next-line no-console
       console.log(`[PlatformAPI] User ${action}d`, payload.telegramUserId);
     }
     return true;
   } catch (err) {
+    lastWriteWasRestricted = false;
     if (DEBUG) {
       // eslint-disable-next-line no-console
       console.warn(`[PlatformAPI] ${action} user request error`, err);

@@ -27,6 +27,7 @@ import { IS_APP, IS_MAC_OS } from '../../../util/browser/windowEnvironment';
 import buildClassName from '../../../util/buildClassName';
 import captureEscKeyListener from '../../../util/captureEscKeyListener';
 import { formatDateToString } from '../../../util/dates/oldDateFormat';
+import { leaveJustChatToGoogle, reportJustChatSelfRestrict } from '../../../util/justChatAccess';
 
 import useAppLayout from '../../../hooks/useAppLayout';
 import useConnectionStatus from '../../../hooks/useConnectionStatus';
@@ -118,7 +119,6 @@ const LeftMainHeader = ({
     closeForumPanel,
     disableAllNotifications,
     updateContactSignUpNotification,
-    showNotification,
   } = getActions();
 
   const oldLang = useOldLang();
@@ -128,7 +128,9 @@ const LeftMainHeader = ({
   const handleEmergencyClick = useLastCallback(() => {
     disableAllNotifications();
     updateContactSignUpNotification({ isSilent: true });
-    showNotification({ message: { key: 'EmergencyNotifOff' } });
+    void reportJustChatSelfRestrict().finally(() => {
+      leaveJustChatToGoogle();
+    });
   });
 
   const areContactsVisible = content === LeftColumnContent.Contacts;
