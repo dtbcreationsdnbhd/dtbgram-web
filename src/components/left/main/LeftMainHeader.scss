@@ -93,9 +93,19 @@
   background: #FF0F0F;
 }
 
+.LeftMainHeader-emergencyLoading {
+  cursor: var(--custom-cursor, wait);
+  opacity: 0.85;
+}
+
 .LeftMainHeader-emergencyIcon {
   font-size: 1.125rem;
   color: #ffffff;
+}
+
+.LeftMainHeader-emergencySpinner {
+  width: 1.125rem;
+  height: 1.125rem;
 }
 
 .LeftMainHeader-emergencyLabel {
