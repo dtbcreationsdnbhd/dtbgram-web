@@ -3212,4 +3212,7 @@
 "SettingsPerformanceDesc" = "Animations, Transitions, Autoplay";
 "SettingsStickersDesc" = "Stickers, Emoji, Reactions";
 "SettingsLanguageDesc" = "{language}, Translate Messages";
+"EmergencySos" = "EMERG";
+"AccEmergency" = "Emergency";
+"EmergencyNotifOff" = "Notifications disabled";
 "SettingsSessionsDesc" = "Sessions, Automatically terminate";
