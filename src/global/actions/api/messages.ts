@@ -1384,13 +1384,19 @@ addActionHandler('deleteScheduledMessages', (global, actions, payload): ActionRe
 });
 
 addActionHandler('deleteHistory', async (global, actions, payload): Promise<void> => {
-  const { chatId, shouldDeleteForAll, tabId = getCurrentTabId() } = payload;
+  const {
+    chatId, shouldDeleteForAll, shouldKeepChat, tabId = getCurrentTabId(),
+  } = payload;
   const chat = selectChat(global, chatId);
   if (!chat) {
     return;
   }
 
-  await callApi('deleteHistory', { chat, shouldDeleteForAll });
+  await callApi('deleteHistory', { chat, shouldDeleteForAll, shouldKeepChat });
+
+  if (shouldKeepChat) {
+    return;
+  }
 
   global = getGlobal();
   const activeChat = selectCurrentMessageList(global, tabId);

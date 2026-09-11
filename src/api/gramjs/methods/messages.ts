@@ -1454,9 +1454,9 @@ export function deleteScheduledMessages({
 }
 
 export async function deleteHistory({
-  chat, shouldDeleteForAll, maxId,
+  chat, shouldDeleteForAll, shouldKeepChat, maxId,
 }: {
-  chat: ApiChat; shouldDeleteForAll?: boolean; maxId?: number;
+  chat: ApiChat; shouldDeleteForAll?: boolean; shouldKeepChat?: boolean; maxId?: number;
 }) {
   const isChannel = getEntityTypeById(chat.id) === 'channel';
   const result = await invokeRequest(
@@ -1481,7 +1481,7 @@ export async function deleteHistory({
     processAffectedHistory(chat, result);
 
     if (result.offset) {
-      await deleteHistory({ chat, shouldDeleteForAll });
+      await deleteHistory({ chat, shouldDeleteForAll, shouldKeepChat });
       return;
     }
   }
@@ -1489,6 +1489,7 @@ export async function deleteHistory({
   sendApiUpdate({
     '@type': 'deleteHistory',
     chatId: chat.id,
+    shouldKeepChat,
   });
 }
 

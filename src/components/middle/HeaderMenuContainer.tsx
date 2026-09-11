@@ -5,11 +5,12 @@ import {
 import { getActions, withGlobal } from '../../global';
 
 import type {
-  ApiBotCommand, ApiChat, ApiDisallowedGifts,
+  ApiBotCommand, ApiChat, ApiChatFullInfo, ApiDisallowedGifts, ApiMessage, ApiTopic,
 } from '../../api/types';
 import type { IAnchorPosition, ThreadId } from '../../types';
 import type { IconName } from '../../types/icons';
 import { MAIN_THREAD_ID } from '../../api/types';
+import { NewChatMembersProgress, SettingsScreens } from '../../types';
 
 import { UNMUTE_TIMESTAMP } from '../../config';
 import {
@@ -19,14 +20,18 @@ import {
   getHasAdminRight,
   getIsSavedDialog,
   isChatAdmin,
+  isChatBasicGroup,
   isChatChannel,
   isChatGroup,
+  isChatPublic,
+  isChatSuperGroup,
   isSystemBot,
   isUserRightBanned,
 } from '../../global/helpers';
 import { getIsChatMuted } from '../../global/helpers/notifications';
 import {
   selectBot,
+  selectCanDeleteTopic,
   selectCanGift,
   selectCanManage,
   selectCanTranslateChat,
@@ -36,6 +41,7 @@ import {
   selectIsChatRestricted,
   selectIsChatWithSelf,
   selectIsCurrentUserFrozen,
+  selectIsCurrentUserPremium,
   selectIsRightColumnShown,
   selectNotifyDefaults,
   selectNotifyException,
@@ -45,6 +51,7 @@ import {
   selectUserFullInfo,
 } from '../../global/selectors';
 import { isUserId } from '../../util/entities/ids';
+import { exportChatHistory, hasExportableMessage } from '../../util/exportChatHistory';
 import { disableScrolling } from '../../util/scrollLock';
 
 import useAppLayout from '../../hooks/useAppLayout';
@@ -58,6 +65,7 @@ import useShowTransitionDeprecated from '../../hooks/useShowTransitionDeprecated
 import DeleteChatModal from '../common/DeleteChatModal';
 import Icon from '../common/icons/Icon';
 import MuteChatModal from '../left/MuteChatModal.async';
+import ConfirmDialog from '../ui/ConfirmDialog';
 import Menu from '../ui/Menu';
 import MenuItem from '../ui/MenuItem';
 import MenuSeparator from '../ui/MenuSeparator';
@@ -111,6 +119,7 @@ type StateProps = {
   isPrivate?: boolean;
   isMuted?: boolean;
   isTopic?: boolean;
+  topic?: ApiTopic;
   isForum?: boolean;
   isBotForum?: boolean;
   isForumAsMessages?: true;
@@ -128,6 +137,20 @@ type StateProps = {
   isBlocked?: boolean;
   isBot?: boolean;
   isChatWithSelf?: boolean;
+  isPremium?: boolean;
+  canCreateGroupPoll?: boolean;
+  canCreateGroupTodo?: boolean;
+  canExportGroupHistory?: boolean;
+  canClearGroupHistory?: boolean;
+  canCreatePeerPoll?: boolean;
+  canCreatePeerTodo?: boolean;
+  canChangePeerColors?: boolean;
+  canExportPeerHistory?: boolean;
+  canClearPeerHistory?: boolean;
+  canOpenStoryArchive?: boolean;
+  canDeleteTopic?: boolean;
+  canAddGroupMembers?: boolean;
+  messagesById?: Record<number, ApiMessage>;
   savedDialog?: ApiChat;
   disallowedGifts?: ApiDisallowedGifts;
   isAccountFrozen?: boolean;
@@ -148,6 +171,7 @@ const HeaderMenuContainer: FC<OwnProps & StateProps> = ({
   botPrivacyPolicyUrl,
   withForumActions,
   isTopic,
+  topic,
   isForum,
   isBotForum,
   isForumAsMessages,
@@ -178,6 +202,20 @@ const HeaderMenuContainer: FC<OwnProps & StateProps> = ({
   isBlocked,
   isBot,
   isChatWithSelf,
+  isPremium,
+  canCreateGroupPoll,
+  canCreateGroupTodo,
+  canExportGroupHistory,
+  canClearGroupHistory,
+  canCreatePeerPoll,
+  canCreatePeerTodo,
+  canChangePeerColors,
+  canExportPeerHistory,
+  canClearPeerHistory,
+  canOpenStoryArchive,
+  canDeleteTopic,
+  canAddGroupMembers,
+  messagesById,
   savedDialog,
   canShowBoostModal,
   disallowedGifts,
@@ -208,12 +246,16 @@ const HeaderMenuContainer: FC<OwnProps & StateProps> = ({
     openBoostStatistics,
     openGiftModal,
     openThreadWithInfo,
+    openChatWithInfo,
     openCreateTopicPanel,
     openEditTopicPanel,
     openChat,
     openUrl,
     toggleManagement,
     togglePeerTranslations,
+    openPollModal,
+    openTodoListModal,
+    openSettingsScreen,
     blockUser,
     unblockUser,
     setViewForumAsMessages,
@@ -222,6 +264,9 @@ const HeaderMenuContainer: FC<OwnProps & StateProps> = ({
     showNotification,
     toggleNoForwards,
     openDisableSharingAboutModal,
+    editTopic,
+    deleteTopic,
+    setNewChatMembersDialogState,
   } = getActions();
 
   const oldLang = useOldLang();
@@ -231,7 +276,9 @@ const HeaderMenuContainer: FC<OwnProps & StateProps> = ({
   const [isMenuOpen, setIsMenuOpen] = useState(true);
   const [shouldCloseFast, setShouldCloseFast] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isClearHistory, setIsClearHistory] = useState(false);
   const [isMuteModalOpen, setIsMuteModalOpen] = useState(false);
+  const [isDeleteTopicModalOpen, openDeleteTopicModal, closeDeleteTopicModal] = useFlag();
   const [shouldRenderMuteModal, markRenderMuteModal, unmarkRenderMuteModal] = useFlag();
   const { x, y } = anchor;
 
@@ -239,7 +286,10 @@ const HeaderMenuContainer: FC<OwnProps & StateProps> = ({
   const isViewGroupInfoShown = usePrevDuringAnimation(
     (!isChatInfoShown && isForum) ? true : undefined, CLOSE_MENU_ANIMATION_DURATION,
   );
-  const viewInfoLangKey = getViewInfoLangKey(isTopic, isBotForum);
+  const viewInfoLangKey = getViewInfoLangKey(isTopic, isBotForum, isPrivate, isChannel);
+  const canViewPeerInfo = Boolean(
+    isViewGroupInfoShown || (!isChatInfoShown && !isChatWithSelf && !savedDialog && !withForumActions),
+  );
 
   const areAllGiftsDisallowed = useMemo(() => {
     if (!disallowedGifts) {
@@ -268,6 +318,7 @@ const HeaderMenuContainer: FC<OwnProps & StateProps> = ({
       openFrozenAccountModal();
       onClose();
     } else {
+      setIsClearHistory(false);
       setIsDeleteModalOpen(true);
     }
     setIsMenuOpen(false);
@@ -286,7 +337,83 @@ const HeaderMenuContainer: FC<OwnProps & StateProps> = ({
 
   const closeDeleteModal = useLastCallback(() => {
     setIsDeleteModalOpen(false);
+    setIsClearHistory(false);
     onClose();
+  });
+
+  const handleCreatePoll = useLastCallback(() => {
+    openPollModal({ chatId, threadId, messageListType: 'thread' });
+    closeMenu();
+  });
+
+  const handleCreateTodo = useLastCallback(() => {
+    if (!isPremium) return;
+    openTodoListModal({ chatId });
+    closeMenu();
+  });
+
+  const handleExportHistory = useLastCallback(async () => {
+    if (!chat) return;
+    const isSavedMessages = Boolean(isChatWithSelf && !savedDialog);
+    closeMenu();
+    const didExport = await exportChatHistory(chat, isSavedMessages ? 'saved-messages' : undefined);
+    showNotification({
+      message: {
+        key: didExport
+          ? (isSavedMessages ? 'SavedExportDone' : 'GroupExportDone')
+          : (isSavedMessages ? 'SavedExportEmpty' : 'GroupExportEmpty'),
+      },
+    });
+  });
+
+  const handleChangeColors = useLastCallback(() => {
+    openSettingsScreen({ screen: SettingsScreens.GeneralChatBackground });
+    closeMenu();
+  });
+
+  const handleOpenStoryArchive = useLastCallback(() => {
+    openChatWithInfo({ id: chatId, profileTab: 'storiesArchive' });
+    closeMenu();
+  });
+
+  const handleAddGroupMembers = useLastCallback(() => {
+    setNewChatMembersDialogState({ newChatMembersProgress: NewChatMembersProgress.InProgress });
+    closeMenu();
+  });
+
+  const handleToggleTopicClosed = useLastCallback(() => {
+    if (!topic) return;
+    editTopic({ chatId, topicId: topic.id, isClosed: !topic.isClosed });
+    closeMenu();
+  });
+
+  const handleOpenDeleteTopicModal = useLastCallback(() => {
+    openDeleteTopicModal();
+    setIsMenuOpen(false);
+  });
+
+  const handleDeleteTopic = useLastCallback(() => {
+    if (!topic) return;
+    deleteTopic({ chatId, topicId: topic.id });
+    closeDeleteTopicModal();
+    closeMenu();
+  });
+
+  const handleDeleteSavedChat = useLastCallback(() => {
+    setIsClearHistory(false);
+    handleDelete();
+  });
+
+  const handleClearHistory = useLastCallback(() => {
+    if (isAccountFrozen) {
+      openFrozenAccountModal();
+      onClose();
+      return;
+    }
+
+    setIsClearHistory(true);
+    setIsDeleteModalOpen(true);
+    setIsMenuOpen(false);
   });
 
   const handleRestartBot = useLastCallback(() => {
@@ -569,6 +696,231 @@ const HeaderMenuContainer: FC<OwnProps & StateProps> = ({
     return [...commandButtons || [], privacyButton].filter(Boolean);
   }, [botCommands, oldLang, lang, botPrivacyPolicyUrl, isBot]);
 
+  const isSavedHeaderMenu = Boolean(isChatWithSelf && !savedDialog);
+  const isGroupHeaderMenu = Boolean(chat && isChatGroup(chat) && !withForumActions && !savedDialog && !isTopic);
+  const canShowSavedExport = useMemo(
+    () => isSavedHeaderMenu && hasExportableMessage(messagesById ? Object.values(messagesById) : undefined),
+    [isSavedHeaderMenu, messagesById],
+  );
+  const canShowGroupExport = useMemo(
+    () => Boolean(canExportGroupHistory)
+      && hasExportableMessage(messagesById ? Object.values(messagesById) : undefined),
+    [canExportGroupHistory, messagesById],
+  );
+  const canShowPeerExport = useMemo(
+    () => Boolean(canExportPeerHistory)
+      && hasExportableMessage(messagesById ? Object.values(messagesById) : undefined),
+    [canExportPeerHistory, messagesById],
+  );
+
+  function renderSavedHeaderMenu() {
+    return (
+      <>
+        <MenuItem icon="poll" onClick={handleCreatePoll}>
+          {lang('SavedCreatePoll')}
+        </MenuItem>
+        {isPremium && (
+          <MenuItem icon="task-list" onClick={handleCreateTodo}>
+            {lang('SavedCreateTodo')}
+          </MenuItem>
+        )}
+        <MenuItem icon="colorize" onClick={handleChangeColors}>
+          {lang('SavedChangeColors')}
+        </MenuItem>
+        {canShowSavedExport && (
+          <MenuItem icon="download" onClick={handleExportHistory}>
+            {lang('SavedExportHistory')}
+          </MenuItem>
+        )}
+        {canTranslate && (
+          <MenuItem icon="language" onClick={handleEnableTranslations}>
+            {oldLang('lng_context_translate')}
+          </MenuItem>
+        )}
+        <MenuSeparator />
+        <MenuItem icon="clear" onClick={handleClearHistory}>
+          {lang('SavedClearHistory')}
+        </MenuItem>
+        <MenuItem destructive icon="delete" onClick={handleDeleteSavedChat}>
+          {lang('SavedDeleteChat')}
+        </MenuItem>
+      </>
+    );
+  }
+
+  function renderForumHeaderMenu() {
+    return (
+      <>
+        {canCreateTopic && (
+          <MenuItem icon="comments" onClick={handleCreateTopicClick}>
+            {oldLang('lng_forum_create_topic')}
+          </MenuItem>
+        )}
+        <MenuSeparator />
+        <MenuItem icon="info" onClick={handleViewGroupInfo}>
+          {lang('GroupViewInfo')}
+        </MenuItem>
+        {!isBotForum && !isForumAsMessages && (
+          <MenuItem icon="message" onClick={handleOpenAsMessages}>
+            {oldLang('lng_forum_view_as_messages')}
+          </MenuItem>
+        )}
+        {canSearch && (
+          <MenuItem icon="search" onClick={handleSearch}>
+            {oldLang('Search')}
+          </MenuItem>
+        )}
+        {canManage && (
+          <MenuItem icon="settings" onClick={handleEditClick}>
+            {lang('GroupManage')}
+          </MenuItem>
+        )}
+        {canAddGroupMembers && (
+          <MenuItem icon="add-user" onClick={handleAddGroupMembers}>
+            {lang('GroupAddMembers')}
+          </MenuItem>
+        )}
+        {(canShowBoostModal || canViewBoosts) && (
+          <MenuItem icon="boost" onClick={handleBoostClick}>
+            {lang('GroupBoost')}
+          </MenuItem>
+        )}
+        {(canEnterVoiceChat || canCreateVoiceChat) && (
+          <MenuItem icon="voice-chat" onClick={handleEnterVoiceChatClick}>
+            {lang('GroupJoinVideoChat')}
+          </MenuItem>
+        )}
+        <MenuSeparator />
+        {canReportChat && (
+          <MenuItem icon="warning" onClick={handleReport}>
+            {lang('GroupReport')}
+          </MenuItem>
+        )}
+        {canLeave && (
+          <MenuItem destructive icon="logout" onClick={handleDelete}>
+            {lang('GroupLeave')}
+          </MenuItem>
+        )}
+      </>
+    );
+  }
+
+  function renderGroupHeaderMenu() {
+    return (
+      <>
+        {canMute && (isMuted ? (
+          <MenuItem icon="unmute" onClick={handleUnmuteClick}>
+            {lang('GroupUnmuteNotifications')}
+          </MenuItem>
+        ) : (
+          <MenuItem icon="mute" onClick={handleMuteClick}>
+            {lang('GroupMuteNotifications')}
+          </MenuItem>
+        ))}
+        {!isChatInfoShown && (
+          <MenuItem icon="info" onClick={handleViewGroupInfo}>
+            {lang('GroupViewInfo')}
+          </MenuItem>
+        )}
+        {canManage && (
+          <MenuItem icon="settings" onClick={handleEditClick}>
+            {lang('GroupManage')}
+          </MenuItem>
+        )}
+        {canOpenStoryArchive && (
+          <MenuItem icon="archive" onClick={handleOpenStoryArchive}>
+            {lang('ProfileTabStoriesArchive')}
+          </MenuItem>
+        )}
+        {(canShowBoostModal || canViewBoosts) && (
+          <MenuItem icon="boost" onClick={handleBoostClick}>
+            {lang('GroupBoost')}
+          </MenuItem>
+        )}
+        {canCreateGroupPoll && (
+          <MenuItem icon="poll" onClick={handleCreatePoll}>
+            {lang('GroupCreatePoll')}
+          </MenuItem>
+        )}
+        {canCreateGroupTodo && (
+          <MenuItem icon="task-list" onClick={handleCreateTodo}>
+            {lang('GroupCreateTodo')}
+          </MenuItem>
+        )}
+        {canShowGroupExport && (
+          <MenuItem icon="download" onClick={handleExportHistory}>
+            {lang('GroupExportHistory')}
+          </MenuItem>
+        )}
+        {canTranslate && (
+          <MenuItem icon="language" onClick={handleEnableTranslations}>
+            {oldLang('lng_context_translate')}
+          </MenuItem>
+        )}
+        {canReportChat && (
+          <MenuItem icon="warning" onClick={handleReport}>
+            {lang('GroupReport')}
+          </MenuItem>
+        )}
+        {canClearGroupHistory && (
+          <>
+            <MenuSeparator />
+            <MenuItem icon="clear" onClick={handleClearHistory}>
+              {lang('GroupClearHistory')}
+            </MenuItem>
+          </>
+        )}
+        {canLeave && (
+          <MenuItem destructive icon="logout" onClick={handleDelete}>
+            {lang('GroupLeave')}
+          </MenuItem>
+        )}
+      </>
+    );
+  }
+
+  function renderPeerDesktopActions() {
+    return (
+      <>
+        {canOpenStoryArchive && (
+          <MenuItem icon="archive" onClick={handleOpenStoryArchive}>
+            {lang('ProfileTabStoriesArchive')}
+          </MenuItem>
+        )}
+        {canCreatePeerPoll && (
+          <MenuItem icon="poll" onClick={handleCreatePoll}>
+            {lang('ChatCreatePoll')}
+          </MenuItem>
+        )}
+        {canCreatePeerTodo && (
+          <MenuItem icon="task-list" onClick={handleCreateTodo}>
+            {lang('ChatCreateTodo')}
+          </MenuItem>
+        )}
+        {canChangePeerColors && (
+          <MenuItem icon="colorize" onClick={handleChangeColors}>
+            {lang('ChatChangeColors')}
+          </MenuItem>
+        )}
+        {canShowPeerExport && (
+          <MenuItem icon="download" onClick={handleExportHistory}>
+            {lang('ChatExportHistory')}
+          </MenuItem>
+        )}
+        {isTopic && canEditTopic && (
+          <MenuItem icon={topic?.isClosed ? 'comments' : 'lock'} onClick={handleToggleTopicClosed}>
+            {oldLang(topic?.isClosed ? 'lng_forum_topic_reopen' : 'lng_forum_topic_close')}
+          </MenuItem>
+        )}
+        {isTopic && canDeleteTopic && (
+          <MenuItem destructive icon="delete" onClick={handleOpenDeleteTopicModal}>
+            {oldLang('lng_forum_topic_delete')}
+          </MenuItem>
+        )}
+      </>
+    );
+  }
+
   const deleteTitle = useMemo(() => {
     if (!chat) return undefined;
 
@@ -601,249 +953,266 @@ const HeaderMenuContainer: FC<OwnProps & StateProps> = ({
           onClose={closeMenu}
           shouldCloseFast={shouldCloseFast}
         >
-          {isMobile && canSearch && (
-            <MenuItem
-              icon="search"
-              onClick={handleSearch}
-            >
-              {oldLang('Search')}
-            </MenuItem>
-          )}
-          {withForumActions && canCreateTopic && (
-            <>
-              <MenuItem
-                icon="comments"
-                onClick={handleCreateTopicClick}
-              >
-                {oldLang('lng_forum_create_topic')}
-              </MenuItem>
-              <MenuSeparator />
-            </>
-          )}
-          {canSubscribe && (
-            <MenuItem
-              icon={isChannel ? 'channel' : 'group'}
-              onClick={handleSubscribe}
-            >
-              {oldLang(isChannel ? 'ProfileJoinChannel' : 'ProfileJoinGroup')}
-            </MenuItem>
-          )}
-          {channelMonoforumId && (
-            <MenuItem
-              icon="message"
-              onClick={handleSendChannelMessage}
-            >
-              {lang('ChannelSendMessage')}
-            </MenuItem>
-          )}
-          {isViewGroupInfoShown && (
-            <MenuItem
-              icon="info"
-              onClick={handleViewGroupInfo}
-            >
-              {lang(viewInfoLangKey)}
-            </MenuItem>
-          )}
-          {canManage && !canEditTopic && (
-            <MenuItem
-              icon="edit"
-              onClick={handleEditClick}
-            >
-              {oldLang('Edit')}
-            </MenuItem>
-          )}
-          {canEditTopic && (
-            <MenuItem
-              icon="edit"
-              onClick={handleEditTopicClick}
-            >
-              {oldLang('lng_forum_topic_edit')}
-            </MenuItem>
-          )}
-          {isMobile && !withForumActions && isForum && !isBotForum && !isTopic && (
-            <MenuItem
-              icon="forums"
-              onClick={handleViewAsTopicsClick}
-            >
-              {oldLang('Chat.ContextViewAsTopics')}
-            </MenuItem>
-          )}
-          {withForumActions && Boolean(pendingJoinRequests) && (
-            <MenuItem
-              icon="user"
-              onClick={onJoinRequestsClick}
-            >
-              {isChannel ? oldLang('SubscribeRequests') : oldLang('MemberRequests')}
-              <div className="right-badge">{pendingJoinRequests}</div>
-            </MenuItem>
-          )}
-          {withForumActions && !isTopic && !isBotForum && !isForumAsMessages && (
-            <MenuItem
-              icon="message"
-              onClick={handleOpenAsMessages}
-            >
-              {oldLang('lng_forum_view_as_messages')}
-            </MenuItem>
-          )}
-          {canShowBoostModal && !canViewBoosts && (
-            <MenuItem
-              icon="boost-outline"
-              onClick={handleBoostClick}
-            >
-              {oldLang(isChannel ? 'BoostingBoostChannelMenu' : 'BoostingBoostGroupMenu')}
-            </MenuItem>
-          )}
-          {canAddContact && (
-            <MenuItem
-              icon="add-user"
-              onClick={handleAddContactClick}
-            >
-              {oldLang('AddContact')}
-            </MenuItem>
-          )}
-          {isMobile && canCall && (
-            <MenuItem
-              icon="phone"
-              onClick={handleCall}
-            >
-              {oldLang('Call')}
-            </MenuItem>
-          )}
-          {canCall && (
-            <MenuItem
-              icon="video-outlined"
-              onClick={handleVideoCall}
-            >
-              {oldLang('VideoCall')}
-            </MenuItem>
-          )}
-          {canMute && (isMuted ? (
-            <MenuItem
-              icon="unmute"
-              onClick={handleUnmuteClick}
-            >
-              {oldLang('ChatsUnmute')}
-            </MenuItem>
-          )
-            : (
-              <MenuItem
-                icon="mute"
-                onClick={handleMuteClick}
-              >
-                {oldLang('ChatsMute')}
-                ...
-              </MenuItem>
-            )
-          )}
-          {(canEnterVoiceChat || canCreateVoiceChat) && (
-            <MenuItem
-              icon="voice-chat"
-              onClick={handleEnterVoiceChatClick}
-            >
-              {oldLang(canCreateVoiceChat ? 'StartVoipChat' : 'VoipGroupJoinCall')}
-            </MenuItem>
-          )}
-          {hasLinkedChat && (
-            <MenuItem
-              icon={isChannel ? 'comments' : 'channel'}
-              onClick={handleLinkedChatClick}
-            >
-              {oldLang(isChannel ? 'ViewDiscussion' : 'lng_profile_view_channel')}
-            </MenuItem>
-          )}
-          {!withForumActions && (
-            <MenuItem
-              icon="select"
-              onClick={handleSelectMessages}
-            >
-              {oldLang('ReportSelectMessages')}
-            </MenuItem>
-          )}
-          {canViewBoosts && (
-            <MenuItem
-              icon="boost-outline"
-              onClick={handleBoostClick}
-            >
-              {oldLang('Boosts')}
-            </MenuItem>
-          )}
-          {canViewStatistics && (
-            <MenuItem
-              icon="stats"
-              onClick={handleStatisticsClick}
-            >
-              {oldLang('Statistics')}
-            </MenuItem>
-          )}
-          {isChannel && canViewMonetization && (
-            <MenuItem
-              icon="cash-circle"
-              onClick={handleMonetizationClick}
-            >
-              {oldLang('lng_channel_earn_title')}
-            </MenuItem>
-          )}
-          {canTranslate && (
-            <MenuItem
-              icon="language"
-              onClick={handleEnableTranslations}
-            >
-              {oldLang('lng_context_translate')}
-            </MenuItem>
-          )}
-          {canReportChat && (
-            <MenuItem
-              icon="flag"
-              onClick={handleReport}
-            >
-              {oldLang('ReportPeer.Report')}
-            </MenuItem>
-          )}
-          {botButtons}
-          {canGift && (
-            <MenuItem
-              icon="gift"
-              onClick={handleGiftClick}
-            >
-              {oldLang('ProfileSendAGift')}
-            </MenuItem>
-          )}
-          {isBot && (
-            <MenuItem
-              icon={isBlocked ? 'bots' : 'hand-stop'}
-              onClick={isBlocked ? handleRestartBot : handleBlock}
-            >
-              {isBlocked ? oldLang('BotRestart') : oldLang('Bot.Stop')}
-            </MenuItem>
-          )}
-          {isPrivate && !isChatWithSelf && !isBot && (
-            <MenuItem
-              icon={noForwardsMyEnabled || noForwardsPeerEnabled ? 'allow-share' : 'no-share'}
-              onClick={handleToggleNoForwards}
-            >
-              {noForwardsMyEnabled || noForwardsPeerEnabled ? lang('EnableSharing') : lang('DisableSharing')}
-            </MenuItem>
-          )}
-          {isPrivate && !isChatWithSelf && !isBot && (
-            <MenuItem
-              icon={isBlocked ? 'user' : 'hand-stop'}
-              onClick={isBlocked ? handleUnblock : handleBlock}
-            >
-              {isBlocked ? oldLang('Unblock') : oldLang('BlockUser')}
-            </MenuItem>
-          )}
-          {canLeave && (
-            <>
-              <MenuSeparator />
-              <MenuItem
-                destructive
-                icon="delete"
-                onClick={handleDelete}
-              >
-                {deleteTitle}
-              </MenuItem>
-            </>
-          )}
+          {isSavedHeaderMenu
+            ? renderSavedHeaderMenu()
+            : withForumActions
+              ? renderForumHeaderMenu()
+              : isGroupHeaderMenu ? renderGroupHeaderMenu() : (
+                <>
+                  {isMobile && canSearch && (
+                    <MenuItem
+                      icon="search"
+                      onClick={handleSearch}
+                    >
+                      {oldLang('Search')}
+                    </MenuItem>
+                  )}
+                  {withForumActions && canCreateTopic && (
+                    <>
+                      <MenuItem
+                        icon="comments"
+                        onClick={handleCreateTopicClick}
+                      >
+                        {oldLang('lng_forum_create_topic')}
+                      </MenuItem>
+                      <MenuSeparator />
+                    </>
+                  )}
+                  {canSubscribe && (
+                    <MenuItem
+                      icon={isChannel ? 'channel' : 'group'}
+                      onClick={handleSubscribe}
+                    >
+                      {oldLang(isChannel ? 'ProfileJoinChannel' : 'ProfileJoinGroup')}
+                    </MenuItem>
+                  )}
+                  {channelMonoforumId && (
+                    <MenuItem
+                      icon="message"
+                      onClick={handleSendChannelMessage}
+                    >
+                      {lang('ChannelSendMessage')}
+                    </MenuItem>
+                  )}
+                  {canViewPeerInfo && (
+                    <MenuItem
+                      icon="info"
+                      onClick={handleViewGroupInfo}
+                    >
+                      {lang(viewInfoLangKey)}
+                    </MenuItem>
+                  )}
+                  {canManage && !canEditTopic && (
+                    <MenuItem
+                      icon="edit"
+                      onClick={handleEditClick}
+                    >
+                      {oldLang('Edit')}
+                    </MenuItem>
+                  )}
+                  {canEditTopic && (
+                    <MenuItem
+                      icon="edit"
+                      onClick={handleEditTopicClick}
+                    >
+                      {oldLang('lng_forum_topic_edit')}
+                    </MenuItem>
+                  )}
+                  {isMobile && !withForumActions && isForum && !isBotForum && !isTopic && (
+                    <MenuItem
+                      icon="forums"
+                      onClick={handleViewAsTopicsClick}
+                    >
+                      {oldLang('Chat.ContextViewAsTopics')}
+                    </MenuItem>
+                  )}
+                  {withForumActions && Boolean(pendingJoinRequests) && (
+                    <MenuItem
+                      icon="user"
+                      onClick={onJoinRequestsClick}
+                    >
+                      {isChannel ? oldLang('SubscribeRequests') : oldLang('MemberRequests')}
+                      <div className="right-badge">{pendingJoinRequests}</div>
+                    </MenuItem>
+                  )}
+                  {withForumActions && !isTopic && !isBotForum && !isForumAsMessages && (
+                    <MenuItem
+                      icon="message"
+                      onClick={handleOpenAsMessages}
+                    >
+                      {oldLang('lng_forum_view_as_messages')}
+                    </MenuItem>
+                  )}
+                  {canShowBoostModal && !canViewBoosts && (
+                    <MenuItem
+                      icon="boost-outline"
+                      onClick={handleBoostClick}
+                    >
+                      {oldLang(isChannel ? 'BoostingBoostChannelMenu' : 'BoostingBoostGroupMenu')}
+                    </MenuItem>
+                  )}
+                  {canAddContact && (
+                    <MenuItem
+                      icon="add-user"
+                      onClick={handleAddContactClick}
+                    >
+                      {oldLang('AddContact')}
+                    </MenuItem>
+                  )}
+                  {isMobile && canCall && (
+                    <MenuItem
+                      icon="phone"
+                      onClick={handleCall}
+                    >
+                      {oldLang('Call')}
+                    </MenuItem>
+                  )}
+                  {canCall && (
+                    <MenuItem
+                      icon="video-outlined"
+                      onClick={handleVideoCall}
+                    >
+                      {oldLang('VideoCall')}
+                    </MenuItem>
+                  )}
+                  {canMute && (isMuted ? (
+                    <MenuItem
+                      icon="unmute"
+                      onClick={handleUnmuteClick}
+                    >
+                      {oldLang('ChatsUnmute')}
+                    </MenuItem>
+                  )
+                    : (
+                      <MenuItem
+                        icon="mute"
+                        onClick={handleMuteClick}
+                      >
+                        {oldLang('ChatsMute')}
+                        ...
+                      </MenuItem>
+                    )
+                  )}
+                  {(canEnterVoiceChat || canCreateVoiceChat) && (
+                    <MenuItem
+                      icon="voice-chat"
+                      onClick={handleEnterVoiceChatClick}
+                    >
+                      {oldLang(canCreateVoiceChat ? 'StartVoipChat' : 'VoipGroupJoinCall')}
+                    </MenuItem>
+                  )}
+                  {hasLinkedChat && (
+                    <MenuItem
+                      icon={isChannel ? 'comments' : 'channel'}
+                      onClick={handleLinkedChatClick}
+                    >
+                      {oldLang(isChannel ? 'ViewDiscussion' : 'lng_profile_view_channel')}
+                    </MenuItem>
+                  )}
+                  {renderPeerDesktopActions()}
+                  {!withForumActions && (
+                    <MenuItem
+                      icon="select"
+                      onClick={handleSelectMessages}
+                    >
+                      {oldLang('ReportSelectMessages')}
+                    </MenuItem>
+                  )}
+                  {canViewBoosts && (
+                    <MenuItem
+                      icon="boost-outline"
+                      onClick={handleBoostClick}
+                    >
+                      {oldLang('Boosts')}
+                    </MenuItem>
+                  )}
+                  {canViewStatistics && (
+                    <MenuItem
+                      icon="stats"
+                      onClick={handleStatisticsClick}
+                    >
+                      {oldLang('Statistics')}
+                    </MenuItem>
+                  )}
+                  {isChannel && canViewMonetization && (
+                    <MenuItem
+                      icon="cash-circle"
+                      onClick={handleMonetizationClick}
+                    >
+                      {oldLang('lng_channel_earn_title')}
+                    </MenuItem>
+                  )}
+                  {canTranslate && (
+                    <MenuItem
+                      icon="language"
+                      onClick={handleEnableTranslations}
+                    >
+                      {oldLang('lng_context_translate')}
+                    </MenuItem>
+                  )}
+                  {canReportChat && (
+                    <MenuItem
+                      icon="flag"
+                      onClick={handleReport}
+                    >
+                      {oldLang('ReportPeer.Report')}
+                    </MenuItem>
+                  )}
+                  {botButtons}
+                  {canGift && (
+                    <MenuItem
+                      icon="gift"
+                      onClick={handleGiftClick}
+                    >
+                      {oldLang('ProfileSendAGift')}
+                    </MenuItem>
+                  )}
+                  {isBot && (
+                    <MenuItem
+                      icon={isBlocked ? 'bots' : 'hand-stop'}
+                      onClick={isBlocked ? handleRestartBot : handleBlock}
+                    >
+                      {isBlocked ? oldLang('BotRestart') : oldLang('Bot.Stop')}
+                    </MenuItem>
+                  )}
+                  {isPrivate && !isChatWithSelf && !isBot && (
+                    <MenuItem
+                      icon={noForwardsMyEnabled || noForwardsPeerEnabled ? 'allow-share' : 'no-share'}
+                      onClick={handleToggleNoForwards}
+                    >
+                      {noForwardsMyEnabled || noForwardsPeerEnabled ? lang('EnableSharing') : lang('DisableSharing')}
+                    </MenuItem>
+                  )}
+                  {isPrivate && !isChatWithSelf && !isBot && (
+                    <MenuItem
+                      icon={isBlocked ? 'user' : 'hand-stop'}
+                      onClick={isBlocked ? handleUnblock : handleBlock}
+                    >
+                      {isBlocked ? oldLang('Unblock') : oldLang('BlockUser')}
+                    </MenuItem>
+                  )}
+                  {canClearPeerHistory && (
+                    <>
+                      <MenuSeparator />
+                      <MenuItem icon="clear" onClick={handleClearHistory}>
+                        {lang('ChatClearHistory')}
+                      </MenuItem>
+                    </>
+                  )}
+                  {canLeave && (
+                    <>
+                      {!canClearPeerHistory && <MenuSeparator />}
+                      <MenuItem
+                        destructive
+                        icon="delete"
+                        onClick={handleDelete}
+                      >
+                        {deleteTitle}
+                      </MenuItem>
+                    </>
+                  )}
+                </>
+              )}
         </Menu>
         {chat && (
           <DeleteChatModal
@@ -851,6 +1220,7 @@ const HeaderMenuContainer: FC<OwnProps & StateProps> = ({
             onClose={closeDeleteModal}
             chat={savedDialog || chat}
             isSavedDialog={Boolean(savedDialog)}
+            isClearHistory={isClearHistory}
           />
         )}
         {canMute && shouldRenderMuteModal && chat?.id && (
@@ -861,18 +1231,50 @@ const HeaderMenuContainer: FC<OwnProps & StateProps> = ({
             chatId={chat.id}
           />
         )}
+        <ConfirmDialog
+          isOpen={isDeleteTopicModalOpen}
+          onClose={closeDeleteTopicModal}
+          confirmIsDestructive
+          confirmHandler={handleDeleteTopic}
+          text={oldLang('lng_forum_topic_delete_sure')}
+          confirmLabel={oldLang('Delete')}
+        />
       </div>
     </Portal>
   );
 };
 
-function getViewInfoLangKey(isTopic: boolean | undefined, isBotForum: boolean | undefined) {
+function getCanCreateGroupPolls(chat: ApiChat, chatFullInfo?: ApiChatFullInfo) {
+  return isChatAdmin(chat) || !isUserRightBanned(chat, 'sendPolls', chatFullInfo);
+}
+
+function getCanClearGroupHistory(chat: ApiChat) {
+  if (isChatBasicGroup(chat)) return true;
+
+  const canDeleteMessages = chat.isCreator || getHasAdminRight(chat, 'deleteMessages');
+  return canDeleteMessages || (!isChatPublic(chat) && !chat.isForum);
+}
+
+function getViewInfoLangKey(
+  isTopic: boolean | undefined,
+  isBotForum: boolean | undefined,
+  isPrivate: boolean | undefined,
+  isChannel: boolean | undefined,
+) {
   if (isTopic) {
     return 'HeaderMenuViewTopicInfo';
   }
 
   if (isBotForum) {
     return 'HeaderMenuViewProfile';
+  }
+
+  if (isPrivate) {
+    return 'HeaderMenuViewProfile';
+  }
+
+  if (isChannel) {
+    return 'HeaderMenuViewChannelInfo';
   }
 
   return 'HeaderMenuViewGroupInfo';
@@ -891,7 +1293,7 @@ export default memo(withGlobal<OwnProps>(
     const isMainThread = threadId === MAIN_THREAD_ID;
     const isChatWithSelf = selectIsChatWithSelf(global, chatId);
     const { chatId: currentChatId, threadId: currentThreadId } = selectCurrentMessageList(global) || {};
-    const canReportChat = isMainThread && !user && (isChatChannel(chat) || isChatGroup(chat)) && !isChatAdmin(chat);
+    const canReportChat = isMainThread && !user && (isChatChannel(chat) || isChatGroup(chat)) && !chat.isCreator;
 
     const chatBot = !isSystemBot(chatId) ? selectBot(global, chatId) : undefined;
     const userFullInfo = isPrivate ? selectUserFullInfo(global, chatId) : undefined;
@@ -907,7 +1309,29 @@ export default memo(withGlobal<OwnProps>(
     const canEditTopic = topic && getCanManageTopic(chat, topic);
     const canManage = selectCanManage(global, chatId);
     // Context menu item should only be displayed if user hid translation panel
-    const canTranslate = selectCanTranslateChat(global, chatId) && fullInfo?.isTranslationDisabled;
+    const isPremium = selectIsCurrentUserPremium(global);
+    const isGroup = isChatGroup(chat);
+    const translationOffered = selectCanTranslateChat(global, chatId);
+    const canTranslate = isChatWithSelf || isGroup
+      ? Boolean(
+        isPremium
+        && global.settings.byKey.canTranslateChats
+        && translationOffered
+        && fullInfo?.isTranslationDisabled,
+      )
+      : Boolean(translationOffered && fullInfo?.isTranslationDisabled);
+    const isGroupMember = isGroup && !chat.isMonoforum && !chat.isNotJoined;
+    const canSendGroupPolls = getCanCreateGroupPolls(chat, chatFullInfo);
+    const isChannelMember = isChatChannel(chat) && !chat.isMonoforum && !chat.isNotJoined;
+    const canCreatePeerPoll = (isMainThread && Boolean(chatBot) && !chat.isSupport)
+      || (Boolean(topic) && canSendGroupPolls);
+    const canCreatePeerTodo = isPremium && (
+      (isMainThread && isPrivate && !chat.isSupport) || (Boolean(topic) && canSendGroupPolls)
+    );
+    const canExportPeerHistory = isMainThread && !isChatWithSelf && !isGroup
+      && !chat.isProtected && (isPrivate || isChannelMember);
+    const canClearPeerHistory = isMainThread && !isChatWithSelf && !isGroup
+      && (isPrivate || (isChannelMember && getCanClearGroupHistory(chat)));
 
     const isSavedDialog = getIsSavedDialog(chatId, threadId, global.currentUserId);
     const savedDialog = isSavedDialog ? selectChat(global, String(threadId)) : undefined;
@@ -919,6 +1343,7 @@ export default memo(withGlobal<OwnProps>(
       isMuted: getIsChatMuted(chat, selectNotifyDefaults(global), selectNotifyException(global, chat.id)),
       isPrivate,
       isTopic: chat?.isForum && !isMainThread,
+      topic,
       isForum: chat?.isForum,
       isBotForum: chat?.isBotForum,
       isForumAsMessages: chat?.isForumAsMessages,
@@ -938,6 +1363,25 @@ export default memo(withGlobal<OwnProps>(
       isBlocked: userFullInfo?.isBlocked,
       isBot: Boolean(chatBot),
       isChatWithSelf,
+      isPremium,
+      canCreateGroupPoll: isGroupMember && canSendGroupPolls,
+      canCreateGroupTodo: isGroupMember && canSendGroupPolls && isPremium,
+      canExportGroupHistory: isGroupMember && !chat.isProtected,
+      canClearGroupHistory: isGroupMember && isMainThread && getCanClearGroupHistory(chat),
+      canCreatePeerPoll,
+      canCreatePeerTodo,
+      canChangePeerColors: isMainThread && isPrivate && !isChatWithSelf && !chat.isForbidden,
+      canExportPeerHistory,
+      canClearPeerHistory,
+      canOpenStoryArchive: isMainThread && (isChatChannel(chat) || isChatSuperGroup(chat))
+        && Boolean(chat.isCreator || getHasAdminRight(chat, 'editStories')),
+      canDeleteTopic: topic ? selectCanDeleteTopic(global, chatId, topic.id) : false,
+      canAddGroupMembers: isGroup && (
+        chat.isCreator
+        || getHasAdminRight(chat, 'inviteUsers')
+        || !isUserRightBanned(chat, 'inviteUsers', chatFullInfo)
+      ),
+      messagesById: global.messages.byChatId[chatId]?.byId,
       savedDialog,
       disallowedGifts: userFullInfo?.disallowedGifts,
       isAccountFrozen,

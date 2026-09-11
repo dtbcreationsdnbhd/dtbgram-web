@@ -153,6 +153,9 @@ type StateProps = {
   messagesById?: Record<number, ApiMessage>;
   foundIds?: number[];
   mediaSearchType?: SharedMediaType;
+  sharedMediaResults?: Partial<Record<SharedMediaType, {
+    totalCount?: number;
+  }>>;
   hasCommonChatsTab?: boolean;
   hasStoriesTab?: boolean;
   hasMembersTab?: boolean;
@@ -273,6 +276,7 @@ const Profile = ({
   activeCollectionId,
   giftsFilter,
   mediaSearchType,
+  sharedMediaResults,
   hasCommonChatsTab,
   hasStoriesTab,
   hasMembersTab,
@@ -429,6 +433,10 @@ const Profile = ({
     }
 
     return arr.map((tab) => {
+      const title = lang(tab.key);
+      const count = SHARED_MEDIA_TYPES.has(tab.type)
+        ? sharedMediaResults?.[tab.type as SharedMediaType]?.totalCount
+        : undefined;
       const contextActions: MenuItemContextAction[] | undefined = canUpdateMainTab && mainTab !== tab.type
         && validMainTabTypes.has(tab.type) ? [{
           title: lang('ProfileMenuSetMainTab'),
@@ -440,7 +448,7 @@ const Profile = ({
 
       return {
         type: tab.type,
-        title: lang(tab.key),
+        title: count !== undefined ? `${title} (${lang.number(count)})` : title,
         contextActions,
       } satisfies TabWithPropertiesAndType;
     });
@@ -448,6 +456,7 @@ const Profile = ({
     isGeneralSavedMessages, hasStoriesTab, hasGiftsTab, hasMembersTab, hasPreviewMediaTab, isTopicInfo,
     hasCommonChatsTab, isChannel, isBot, similarChannels?.length, similarBots?.length, lang, isOwnProfile,
     mainTab, chatId, canUpdateMainTab, validMainTabTypes,
+    sharedMediaResults,
   ]);
 
   const [allowAutoScrollToTabs, startAutoScrollToTabsIfNeeded, stopAutoScrollToTabs] = useFlag(false);
@@ -456,6 +465,10 @@ const Profile = ({
     if (isClosed) return;
     changeProfileTab({ profileTab: type });
     setSharedMediaSearchType({ mediaType: SHARED_MEDIA_TYPES.has(type) ? type as SharedMediaType : undefined });
+  });
+
+  const handleMembersClick = useLastCallback(() => {
+    setActiveTab('members');
   });
 
   useEffect(() => {
@@ -1289,6 +1302,7 @@ const Profile = ({
           canPlayVideo={isReady}
           isForMonoforum={Boolean(monoforumChannel)}
           onExpand={handleExpandProfile}
+          onMembersClick={hasMembersTab ? handleMembersClick : undefined}
         />
         {linkedCommunity && (
           <Island className={styles.linkedCommunityIsland}>
@@ -1505,6 +1519,7 @@ export default memo(withGlobal<OwnProps>(
       messagesById,
       foundIds,
       mediaSearchType,
+      sharedMediaResults: resultsByType,
       hasCommonChatsTab,
       hasStoriesTab,
       hasMembersTab,
