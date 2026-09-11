@@ -2355,6 +2355,9 @@ export interface LangPair {
   'SettingsFoldersDesc': undefined;
   'SettingsPerformanceDesc': undefined;
   'SettingsStickersDesc': undefined;
+  'EmergencySos': undefined;
+  'AccEmergency': undefined;
+  'EmergencyNotifOff': undefined;
   'SettingsSessionsDesc': undefined;
 }
 

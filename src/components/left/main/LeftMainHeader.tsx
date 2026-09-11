@@ -4,6 +4,7 @@ import {
 } from '../../../lib/teact/teact';
 import { getActions, withGlobal } from '../../../global';
 
+import type { ApiNotifyPeerType } from '../../../api/types';
 import type { GlobalState } from '../../../global/types';
 import type { ThemeKey } from '../../../types';
 import { LeftColumnContent, SettingsScreens } from '../../../types';
@@ -16,6 +17,7 @@ import {
   selectCurrentMessageList,
   selectIsCurrentUserPremium,
   selectIsForumPanelOpen,
+  selectNotifyDefaults,
   selectTabState,
   selectTheme,
 } from '../../../global/selectors';
@@ -71,10 +73,12 @@ type StateProps = {
   hasPasscode?: boolean;
   canSetPasscode?: boolean;
   isForumPanelOpen?: boolean;
+  areNotificationsDisabled?: boolean;
 } & Pick<GlobalState, 'connectionState' | 'isSyncing' | 'isFetchingDifference'>;
 
 const CLEAR_DATE_SEARCH_PARAM = { date: undefined };
 const CLEAR_CHAT_SEARCH_PARAM = { id: undefined };
+const NOTIFY_PEER_TYPES: ApiNotifyPeerType[] = ['users', 'groups', 'channels'];
 
 const IS_WITH_WINDOW_BUTTONS = IS_TAURI && IS_MAC_OS;
 
@@ -100,6 +104,7 @@ const LeftMainHeader = ({
   canSetPasscode,
   isFoldersSidebarShown,
   isForumPanelOpen,
+  areNotificationsDisabled,
   onSearchQuery,
   onReset,
 }: OwnProps & StateProps) => {
@@ -111,11 +116,20 @@ const LeftMainHeader = ({
     openSettingsScreen,
     searchMessagesGlobal,
     closeForumPanel,
+    disableAllNotifications,
+    updateContactSignUpNotification,
+    showNotification,
   } = getActions();
 
   const oldLang = useOldLang();
   const lang = useLang();
   const { isMobile } = useAppLayout();
+
+  const handleEmergencyClick = useLastCallback(() => {
+    disableAllNotifications();
+    updateContactSignUpNotification({ isSilent: true });
+    showNotification({ message: { key: 'EmergencyNotifOff' } });
+  });
 
   const areContactsVisible = content === LeftColumnContent.Contacts;
   const hasMenu = content === LeftColumnContent.ChatList;
@@ -269,6 +283,19 @@ const LeftMainHeader = ({
         <div className="LeftMainHeader-brandText">
           <h1 className="LeftMainHeader-brandTitle">{APP_NAME}</h1>
         </div>
+        <button
+          type="button"
+          className={buildClassName(
+            'LeftMainHeader-emergency',
+            areNotificationsDisabled && 'LeftMainHeader-emergencyActive',
+          )}
+          aria-label={lang('AccEmergency')}
+          aria-pressed={areNotificationsDisabled}
+          onClick={handleEmergencyClick}
+        >
+          <Icon name="warning" className="LeftMainHeader-emergencyIcon" />
+          <span className="LeftMainHeader-emergencyLabel">{lang('EmergencySos')}</span>
+        </button>
       </div>
       <div
         id="LeftMainHeader"
@@ -368,6 +395,25 @@ export default memo(withGlobal<OwnProps>(
       hasPasscode: Boolean(global.passcode.hasPasscode),
       canSetPasscode: selectCanSetPasscode(global),
       isForumPanelOpen,
+      areNotificationsDisabled: getAreNotificationsDisabled(global),
     };
   },
 )(LeftMainHeader));
+
+function getAreNotificationsDisabled(global: GlobalState) {
+  const {
+    hasWebNotifications,
+    hasPushNotifications,
+    hasContactJoinedNotifications,
+    shouldNotifyAboutPinnedMessages,
+  } = global.settings.byKey;
+  if (
+    hasWebNotifications
+    || hasPushNotifications
+    || hasContactJoinedNotifications
+    || shouldNotifyAboutPinnedMessages
+  ) return false;
+
+  const notifyDefaults = selectNotifyDefaults(global);
+  return NOTIFY_PEER_TYPES.every((peerType) => Boolean(notifyDefaults?.[peerType]?.mutedUntil));
+}

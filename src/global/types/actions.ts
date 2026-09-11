@@ -258,6 +258,7 @@ export interface ActionPayloads {
   };
 
   loadNotificationSettings: undefined;
+  disableAllNotifications: undefined;
   updateContactSignUpNotification: {
     isSilent: boolean;
   };
