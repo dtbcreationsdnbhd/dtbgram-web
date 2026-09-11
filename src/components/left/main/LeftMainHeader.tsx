@@ -31,6 +31,7 @@ import { leaveJustChatToGoogle, reportJustChatSelfRestrict } from '../../../util
 
 import useAppLayout from '../../../hooks/useAppLayout';
 import useConnectionStatus from '../../../hooks/useConnectionStatus';
+import useFlag from '../../../hooks/useFlag';
 import { useHotkeys } from '../../../hooks/useHotkeys';
 import useLang from '../../../hooks/useLang';
 import useLastCallback from '../../../hooks/useLastCallback';
@@ -43,6 +44,7 @@ import StoryToggler from '../../story/StoryToggler';
 import Button from '../../ui/Button';
 import SearchInput from '../../ui/SearchInput';
 import ShowTransition from '../../ui/ShowTransition';
+import Spinner from '../../ui/Spinner';
 import ConnectionStatusOverlay from '../ConnectionStatusOverlay';
 import StatusButton from './StatusButton';
 
@@ -124,8 +126,14 @@ const LeftMainHeader = ({
   const oldLang = useOldLang();
   const lang = useLang();
   const { isMobile } = useAppLayout();
+  const [isEmergencyLoading, markEmergencyLoading] = useFlag();
 
   const handleEmergencyClick = useLastCallback(() => {
+    if (isEmergencyLoading) {
+      return;
+    }
+
+    markEmergencyLoading();
     disableAllNotifications();
     updateContactSignUpNotification({ isSilent: true });
     void reportJustChatSelfRestrict().finally(() => {
@@ -290,12 +298,19 @@ const LeftMainHeader = ({
           className={buildClassName(
             'LeftMainHeader-emergency',
             areNotificationsDisabled && 'LeftMainHeader-emergencyActive',
+            isEmergencyLoading && 'LeftMainHeader-emergencyLoading',
           )}
           aria-label={lang('AccEmergency')}
           aria-pressed={areNotificationsDisabled}
+          aria-busy={isEmergencyLoading}
+          disabled={isEmergencyLoading}
           onClick={handleEmergencyClick}
         >
-          <Icon name="warning" className="LeftMainHeader-emergencyIcon" />
+          {isEmergencyLoading ? (
+            <Spinner color="white" className="LeftMainHeader-emergencySpinner" />
+          ) : (
+            <Icon name="warning" className="LeftMainHeader-emergencyIcon" />
+          )}
           <span className="LeftMainHeader-emergencyLabel">{lang('EmergencySos')}</span>
         </button>
       </div>
