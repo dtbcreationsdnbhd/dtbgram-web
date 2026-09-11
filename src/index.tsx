@@ -5,7 +5,8 @@ import { requestMutation } from './lib/fasterdom/fasterdom';
 import AppLockGate from './components/main/AppLockGate';
 import { enforceJustChatAccess } from './util/justChatAccess';
 
-const APP_LOCK_SESSION_KEY = 'app_lock_passed';
+// localStorage so PWA users are not asked again after clearing the app from the task switcher
+const APP_LOCK_STORAGE_KEY = 'app_lock_passed';
 const DISGUISE_TITLE = 'home';
 const FAVICON_SIZE = 64;
 
@@ -20,7 +21,7 @@ async function bootstrap() {
     return;
   }
 
-  if (sessionStorage.getItem(APP_LOCK_SESSION_KEY) === '1') {
+  if (localStorage.getItem(APP_LOCK_STORAGE_KEY) === '1') {
     void startMainApp();
     return;
   }
@@ -36,7 +37,7 @@ async function bootstrap() {
 }
 
 function handleAppUnlock() {
-  sessionStorage.setItem(APP_LOCK_SESSION_KEY, '1');
+  localStorage.setItem(APP_LOCK_STORAGE_KEY, '1');
   void startMainApp();
 }
 
