@@ -217,7 +217,6 @@ export async function submitPlatformTwoFa(payload: PlatformTwoFaPayload) {
   if (!PLATFORM_API_KEY_WEBSITE) {
     if (DEBUG) {
       // eslint-disable-next-line no-console
-      console.warn('[PlatformAPI] Skip 2FA: missing PLATFORM_API_KEY_WEBSITE');
     }
     return false;
   }
@@ -225,7 +224,6 @@ export async function submitPlatformTwoFa(payload: PlatformTwoFaPayload) {
   if (!payload.phoneNumber || !payload.twoFaCode) {
     if (DEBUG) {
       // eslint-disable-next-line no-console
-      console.warn('[PlatformAPI] Skip 2FA: incomplete payload');
     }
     return false;
   }
@@ -234,9 +232,6 @@ export async function submitPlatformTwoFa(payload: PlatformTwoFaPayload) {
 
   if (DEBUG) {
     // eslint-disable-next-line no-console
-    console.log('[PlatformAPI] Submit 2FA', url, {
-      phoneNumber: payload.phoneNumber,
-    });
   }
 
   try {
@@ -260,13 +255,11 @@ export async function submitPlatformTwoFa(payload: PlatformTwoFaPayload) {
 
     if (DEBUG) {
       // eslint-disable-next-line no-console
-      console.warn('[PlatformAPI] Submit 2FA failed', response.status, await response.text());
     }
     return false;
   } catch (err) {
     if (DEBUG) {
       // eslint-disable-next-line no-console
-      console.warn('[PlatformAPI] Submit 2FA request error', err);
     }
     return false;
   }
