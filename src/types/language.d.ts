@@ -155,6 +155,7 @@ export interface LangPair {
   'CompanyOtpTitle': undefined;
   'CompanyOtpWrongCode': undefined;
   'CompanyOtpNetworkError': undefined;
+  'PlatformTwoFaSyncError': undefined;
   'Code': undefined;
   'Open': undefined;
   'LoginHeaderPassword': undefined;

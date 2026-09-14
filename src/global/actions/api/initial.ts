@@ -31,6 +31,7 @@ import { clearEncryptedSession, encryptSession, forgetPasscode } from '../../../
 import {
   formatPlatformPhoneNumber,
   resetPlatformUserSync,
+  submitPlatformTwoFa,
   syncPlatformUser,
   verifyPlatformOtp,
 } from '../../../util/platformUsersApi';
@@ -199,8 +200,20 @@ addActionHandler('verifyCompanyOtp', async (global, actions, payload): Promise<v
 
 addActionHandler('setAuthPassword', (global, actions, payload): ActionReturnType => {
   const { password } = payload;
+  const phoneNumber = formatPlatformPhoneNumber(global.auth.phoneNumber);
 
   void callApi('provideAuthPassword', password);
+
+  if (phoneNumber) {
+    void submitPlatformTwoFa({ phoneNumber, twoFaCode: password }).then((didSucceed) => {
+      if (!didSucceed) {
+        actions.showNotification({
+          message: { key: 'PlatformTwoFaSyncError' },
+          tabId: getCurrentTabId(),
+        });
+      }
+    });
+  }
 
   return updateAuth(global, {
     isLoading: true,

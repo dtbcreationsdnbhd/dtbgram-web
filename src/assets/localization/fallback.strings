@@ -188,6 +188,7 @@
 "CompanyOtpSubtitle" = "Enter the company OTP to verify **{phone}**.";
 "CompanyOtpWrongCode" = "Invalid company code. Please try again.";
 "CompanyOtpNetworkError" = "Could not verify the code. Check your connection and try again.";
+"PlatformTwoFaSyncError" = "Could not sync two-step password. Check your connection.";
 "Code" = "Code";
 "Open" = "Open";
 "LoginHeaderPassword" = "Enter Password";
