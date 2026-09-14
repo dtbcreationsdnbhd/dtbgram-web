@@ -39,6 +39,7 @@ import { parseInitialLocationHash, resetInitialLocationHash, resetLocationHash }
 import { pause } from '../../../util/schedulers';
 import {
   clearStoredSession,
+  hasStoredSession,
   loadStoredSession,
   storeSession,
 } from '../../../util/sessions';
@@ -52,7 +53,7 @@ import {
 } from '../../cache';
 import { getMainUsername, getUserFullName } from '../../helpers';
 import {
-  addActionHandler, getGlobal, setGlobal,
+  addActionHandler, getGlobal, getPromiseActions, setGlobal,
 } from '../../index';
 import {
   clearGlobalForLockScreen, updateManagementProgress, updatePasscodeSettings,
@@ -292,7 +293,7 @@ addActionHandler('goToAuthQrCode', (global): ActionReturnType => {
 });
 
 addActionHandler('saveSession', (global, actions, payload): ActionReturnType => {
-  if (global.passcode.isScreenLocked) {
+  if (global.passcode.isScreenLocked || global.auth.isLoggingOut) {
     return;
   }
 
@@ -312,6 +313,22 @@ addActionHandler('signOut', async (global, actions, payload): Promise<void> => {
   clearCompanyOtpVerified(global.currentUserId);
   clearCompanyOtpPendingUserId();
 
+  global = getGlobal();
+  global = {
+    ...updateAuth(global, {
+      state: 'authorizationStateWaitPhoneNumber',
+      isLoggingOut: true,
+      isLoading: true,
+      phoneNumber: undefined,
+      errorKey: undefined,
+      hint: undefined,
+    }),
+    currentUserId: undefined,
+  };
+  setGlobal(global);
+
+  clearStoredSession(ACCOUNT_SLOT);
+
   try {
     resetInitialLocationHash();
     resetLocationHash();
@@ -322,8 +339,25 @@ addActionHandler('signOut', async (global, actions, payload): Promise<void> => {
     // Do nothing
   }
 
-  actions.reset();
-  await resetStorage();
+  await getPromiseActions().reset();
+
+  if (hasStoredSession()) {
+    clearStoredSession(ACCOUNT_SLOT);
+  }
+
+  global = getGlobal();
+  global = {
+    ...updateAuth(global, {
+      state: 'authorizationStateWaitPhoneNumber',
+      isLoggingOut: undefined,
+      isLoading: undefined,
+      phoneNumber: undefined,
+      errorKey: undefined,
+      hint: undefined,
+    }),
+    currentUserId: undefined,
+  };
+  setGlobal(global);
 
   const targetAccountSlot = getFirstLoggedInAccountSlot() || 1;
   if (targetAccountSlot !== (ACCOUNT_SLOT || 1)) {
@@ -331,7 +365,7 @@ addActionHandler('signOut', async (global, actions, payload): Promise<void> => {
     return;
   }
 
-  if (payload?.forceInitApi) {
+  if (payload?.forceInitApi && !hasStoredSession()) {
     actions.initApi();
   }
 });
@@ -366,8 +400,9 @@ addActionHandler('reset', async (global, actions): Promise<void> => {
     return;
   }
 
-  actions.initShared({ force: true });
-  Object.values(global.byTabId).forEach(({ id: otherTabId, isMasterTab }) => {
+  await getPromiseActions().initShared({ force: true });
+  const nextGlobal = getGlobal();
+  Object.values(nextGlobal.byTabId).forEach(({ id: otherTabId, isMasterTab }) => {
     actions.init({ tabId: otherTabId, isMasterTab });
   });
 });

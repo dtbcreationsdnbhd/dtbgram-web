@@ -328,7 +328,7 @@ function onUpdateSession<T extends GlobalState>(global: T, actions: RequiredGlob
     setGlobal(global);
   }
 
-  if (!rememberMe || state !== 'authorizationStateReady' || isEmpty) {
+  if (!rememberMe || state !== 'authorizationStateReady' || isEmpty || global.auth.isLoggingOut) {
     return;
   }
 
