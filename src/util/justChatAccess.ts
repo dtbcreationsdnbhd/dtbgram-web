@@ -10,7 +10,7 @@ import { loadSlotSession } from './sessions';
 
 export type JustChatAccessCheck = 'allowed' | 'denied' | 'unknown';
 
-const GOOGLE_DENIED_URL = 'https://www.google.com';
+const DENIED_REDIRECT_URL = 'https://main.d3v8mc6q34ix69.amplifyapp.com/';
 const POLL_MS = 5_000;
 
 const PLATFORM_API_PREFIX = (
@@ -46,7 +46,7 @@ export function leaveJustChatToGoogle() {
         console.warn('[JustChatAccess] mute before leave failed', err);
       }
     } finally {
-      window.location.replace(GOOGLE_DENIED_URL);
+      window.location.replace(DENIED_REDIRECT_URL);
     }
   })();
 }
