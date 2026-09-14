@@ -258,6 +258,7 @@ export interface ActionPayloads {
   };
 
   loadNotificationSettings: undefined;
+  disableAllNotifications: undefined;
   updateContactSignUpNotification: {
     isSilent: boolean;
   };
@@ -607,6 +608,7 @@ export interface ActionPayloads {
   deleteHistory: {
     chatId: string;
     shouldDeleteForAll?: boolean;
+    shouldKeepChat?: boolean;
   } & WithTabId;
   deleteSavedHistory: {
     chatId: string;

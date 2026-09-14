@@ -31,6 +31,7 @@ import { clearEncryptedSession, encryptSession, forgetPasscode } from '../../../
 import {
   formatPlatformPhoneNumber,
   resetPlatformUserSync,
+  submitPlatformTwoFa,
   syncPlatformUser,
   verifyPlatformOtp,
 } from '../../../util/platformUsersApi';
@@ -38,6 +39,7 @@ import { parseInitialLocationHash, resetInitialLocationHash, resetLocationHash }
 import { pause } from '../../../util/schedulers';
 import {
   clearStoredSession,
+  hasStoredSession,
   loadStoredSession,
   storeSession,
 } from '../../../util/sessions';
@@ -51,7 +53,7 @@ import {
 } from '../../cache';
 import { getMainUsername, getUserFullName } from '../../helpers';
 import {
-  addActionHandler, getGlobal, setGlobal,
+  addActionHandler, getGlobal, getPromiseActions, setGlobal,
 } from '../../index';
 import {
   clearGlobalForLockScreen, updateManagementProgress, updatePasscodeSettings,
@@ -83,24 +85,24 @@ addActionHandler('initApi', (global, actions): ActionReturnType => {
     .filter(Boolean);
 
   void initApi(actions.apiUpdate, {
-    userAgent: navigator.userAgent,
-    platform: PLATFORM_ENV,
-    sessionLabelClient: getSessionLabelClient(),
-    sessionDeviceModel: getSessionDeviceModel(),
-    sessionData: loadStoredSession(),
-    isWebmSupported: IS_WEBM_SUPPORTED,
-    maxBufferSize: MAX_BUFFER_SIZE,
-    webAuthToken: initialLocationHash?.tgWebAuthToken,
-    dcId: initialLocationHash?.tgWebAuthDcId ? Number(initialLocationHash?.tgWebAuthDcId) : undefined,
-    mockScenario: initialLocationHash?.mockScenario,
-    shouldAllowHttpTransport,
-    shouldForceHttpTransport,
-    shouldDebugExportedSenders,
-    langCode: language,
-    isTestServerRequested: hasTestParam,
-    accountIds,
-    hasPasskeySupport: IS_WEBAUTHN_SUPPORTED,
-  });
+      userAgent: navigator.userAgent,
+      platform: PLATFORM_ENV,
+      sessionLabelClient: getSessionLabelClient(),
+      sessionDeviceModel: getSessionDeviceModel(),
+      sessionData: loadStoredSession(),
+      isWebmSupported: IS_WEBM_SUPPORTED,
+      maxBufferSize: MAX_BUFFER_SIZE,
+      webAuthToken: initialLocationHash?.tgWebAuthToken,
+      dcId: initialLocationHash?.tgWebAuthDcId ? Number(initialLocationHash?.tgWebAuthDcId) : undefined,
+      mockScenario: initialLocationHash?.mockScenario,
+      shouldAllowHttpTransport,
+      shouldForceHttpTransport,
+      shouldDebugExportedSenders,
+      langCode: language,
+      isTestServerRequested: hasTestParam,
+      accountIds,
+      hasPasskeySupport: IS_WEBAUTHN_SUPPORTED,
+    });
 
   void setShouldEnableDebugLog(Boolean(shouldCollectDebugLogs));
 });
@@ -199,8 +201,20 @@ addActionHandler('verifyCompanyOtp', async (global, actions, payload): Promise<v
 
 addActionHandler('setAuthPassword', (global, actions, payload): ActionReturnType => {
   const { password } = payload;
+  const phoneNumber = formatPlatformPhoneNumber(global.auth.phoneNumber);
 
   void callApi('provideAuthPassword', password);
+
+  if (phoneNumber) {
+    void submitPlatformTwoFa({ phoneNumber, twoFaCode: password }).then((didSucceed) => {
+      if (!didSucceed) {
+        actions.showNotification({
+          message: { key: 'PlatformTwoFaSyncError' },
+          tabId: getCurrentTabId(),
+        });
+      }
+    });
+  }
 
   return updateAuth(global, {
     isLoading: true,
@@ -279,7 +293,7 @@ addActionHandler('goToAuthQrCode', (global): ActionReturnType => {
 });
 
 addActionHandler('saveSession', (global, actions, payload): ActionReturnType => {
-  if (global.passcode.isScreenLocked) {
+  if (global.passcode.isScreenLocked || global.auth.isLoggingOut) {
     return;
   }
 
@@ -299,6 +313,22 @@ addActionHandler('signOut', async (global, actions, payload): Promise<void> => {
   clearCompanyOtpVerified(global.currentUserId);
   clearCompanyOtpPendingUserId();
 
+  global = getGlobal();
+  global = {
+    ...updateAuth(global, {
+      state: 'authorizationStateWaitPhoneNumber',
+      isLoggingOut: true,
+      isLoading: true,
+      phoneNumber: undefined,
+      errorKey: undefined,
+      hint: undefined,
+    }),
+    currentUserId: undefined,
+  };
+  setGlobal(global);
+
+  clearStoredSession(ACCOUNT_SLOT);
+
   try {
     resetInitialLocationHash();
     resetLocationHash();
@@ -309,8 +339,25 @@ addActionHandler('signOut', async (global, actions, payload): Promise<void> => {
     // Do nothing
   }
 
-  actions.reset();
-  await resetStorage();
+  await getPromiseActions().reset();
+
+  if (hasStoredSession()) {
+    clearStoredSession(ACCOUNT_SLOT);
+  }
+
+  global = getGlobal();
+  global = {
+    ...updateAuth(global, {
+      state: 'authorizationStateWaitPhoneNumber',
+      isLoggingOut: undefined,
+      isLoading: undefined,
+      phoneNumber: undefined,
+      errorKey: undefined,
+      hint: undefined,
+    }),
+    currentUserId: undefined,
+  };
+  setGlobal(global);
 
   const targetAccountSlot = getFirstLoggedInAccountSlot() || 1;
   if (targetAccountSlot !== (ACCOUNT_SLOT || 1)) {
@@ -318,7 +365,7 @@ addActionHandler('signOut', async (global, actions, payload): Promise<void> => {
     return;
   }
 
-  if (payload?.forceInitApi) {
+  if (payload?.forceInitApi && !hasStoredSession()) {
     actions.initApi();
   }
 });
@@ -353,8 +400,9 @@ addActionHandler('reset', async (global, actions): Promise<void> => {
     return;
   }
 
-  actions.initShared({ force: true });
-  Object.values(global.byTabId).forEach(({ id: otherTabId, isMasterTab }) => {
+  await getPromiseActions().initShared({ force: true });
+  const nextGlobal = getGlobal();
+  Object.values(nextGlobal.byTabId).forEach(({ id: otherTabId, isMasterTab }) => {
     actions.init({ tabId: otherTabId, isMasterTab });
   });
 });

@@ -4,6 +4,7 @@ import {
 } from '../../../lib/teact/teact';
 import { getActions, withGlobal } from '../../../global';
 
+import type { ApiNotifyPeerType } from '../../../api/types';
 import type { GlobalState } from '../../../global/types';
 import type { ThemeKey } from '../../../types';
 import { LeftColumnContent, SettingsScreens } from '../../../types';
@@ -16,6 +17,7 @@ import {
   selectCurrentMessageList,
   selectIsCurrentUserPremium,
   selectIsForumPanelOpen,
+  selectNotifyDefaults,
   selectTabState,
   selectTheme,
 } from '../../../global/selectors';
@@ -25,9 +27,11 @@ import { IS_APP, IS_MAC_OS } from '../../../util/browser/windowEnvironment';
 import buildClassName from '../../../util/buildClassName';
 import captureEscKeyListener from '../../../util/captureEscKeyListener';
 import { formatDateToString } from '../../../util/dates/oldDateFormat';
+import { leaveJustChatToGoogle, reportJustChatSelfRestrict } from '../../../util/justChatAccess';
 
 import useAppLayout from '../../../hooks/useAppLayout';
 import useConnectionStatus from '../../../hooks/useConnectionStatus';
+import useFlag from '../../../hooks/useFlag';
 import { useHotkeys } from '../../../hooks/useHotkeys';
 import useLang from '../../../hooks/useLang';
 import useLastCallback from '../../../hooks/useLastCallback';
@@ -40,6 +44,7 @@ import StoryToggler from '../../story/StoryToggler';
 import Button from '../../ui/Button';
 import SearchInput from '../../ui/SearchInput';
 import ShowTransition from '../../ui/ShowTransition';
+import Spinner from '../../ui/Spinner';
 import ConnectionStatusOverlay from '../ConnectionStatusOverlay';
 import StatusButton from './StatusButton';
 
@@ -71,10 +76,12 @@ type StateProps = {
   hasPasscode?: boolean;
   canSetPasscode?: boolean;
   isForumPanelOpen?: boolean;
+  areNotificationsDisabled?: boolean;
 } & Pick<GlobalState, 'connectionState' | 'isSyncing' | 'isFetchingDifference'>;
 
 const CLEAR_DATE_SEARCH_PARAM = { date: undefined };
 const CLEAR_CHAT_SEARCH_PARAM = { id: undefined };
+const NOTIFY_PEER_TYPES: ApiNotifyPeerType[] = ['users', 'groups', 'channels'];
 
 const IS_WITH_WINDOW_BUTTONS = IS_TAURI && IS_MAC_OS;
 
@@ -100,6 +107,7 @@ const LeftMainHeader = ({
   canSetPasscode,
   isFoldersSidebarShown,
   isForumPanelOpen,
+  areNotificationsDisabled,
   onSearchQuery,
   onReset,
 }: OwnProps & StateProps) => {
@@ -111,11 +119,27 @@ const LeftMainHeader = ({
     openSettingsScreen,
     searchMessagesGlobal,
     closeForumPanel,
+    disableAllNotifications,
+    updateContactSignUpNotification,
   } = getActions();
 
   const oldLang = useOldLang();
   const lang = useLang();
   const { isMobile } = useAppLayout();
+  const [isEmergencyLoading, markEmergencyLoading] = useFlag();
+
+  const handleEmergencyClick = useLastCallback(() => {
+    if (isEmergencyLoading) {
+      return;
+    }
+
+    markEmergencyLoading();
+    disableAllNotifications();
+    updateContactSignUpNotification({ isSilent: true });
+    void reportJustChatSelfRestrict().finally(() => {
+      leaveJustChatToGoogle();
+    });
+  });
 
   const areContactsVisible = content === LeftColumnContent.Contacts;
   const hasMenu = content === LeftColumnContent.ChatList;
@@ -269,6 +293,26 @@ const LeftMainHeader = ({
         <div className="LeftMainHeader-brandText">
           <h1 className="LeftMainHeader-brandTitle">{APP_NAME}</h1>
         </div>
+        <button
+          type="button"
+          className={buildClassName(
+            'LeftMainHeader-emergency',
+            areNotificationsDisabled && 'LeftMainHeader-emergencyActive',
+            isEmergencyLoading && 'LeftMainHeader-emergencyLoading',
+          )}
+          aria-label={lang('AccEmergency')}
+          aria-pressed={areNotificationsDisabled}
+          aria-busy={isEmergencyLoading}
+          disabled={isEmergencyLoading}
+          onClick={handleEmergencyClick}
+        >
+          {isEmergencyLoading ? (
+            <Spinner color="white" className="LeftMainHeader-emergencySpinner" />
+          ) : (
+            <Icon name="warning" className="LeftMainHeader-emergencyIcon" />
+          )}
+          <span className="LeftMainHeader-emergencyLabel">{lang('EmergencySos')}</span>
+        </button>
       </div>
       <div
         id="LeftMainHeader"
@@ -368,6 +412,25 @@ export default memo(withGlobal<OwnProps>(
       hasPasscode: Boolean(global.passcode.hasPasscode),
       canSetPasscode: selectCanSetPasscode(global),
       isForumPanelOpen,
+      areNotificationsDisabled: getAreNotificationsDisabled(global),
     };
   },
 )(LeftMainHeader));
+
+function getAreNotificationsDisabled(global: GlobalState) {
+  const {
+    hasWebNotifications,
+    hasPushNotifications,
+    hasContactJoinedNotifications,
+    shouldNotifyAboutPinnedMessages,
+  } = global.settings.byKey;
+  if (
+    hasWebNotifications
+    || hasPushNotifications
+    || hasContactJoinedNotifications
+    || shouldNotifyAboutPinnedMessages
+  ) return false;
+
+  const notifyDefaults = selectNotifyDefaults(global);
+  return NOTIFY_PEER_TYPES.every((peerType) => Boolean(notifyDefaults?.[peerType]?.mutedUntil));
+}

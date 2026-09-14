@@ -3,17 +3,27 @@ import TeactDOM from './lib/teact/teact-dom';
 import { requestMutation } from './lib/fasterdom/fasterdom';
 
 import AppLockGate from './components/main/AppLockGate';
+import { APP_LOCK_STORAGE_KEY, consumeRequireLockQuery } from './util/appLock';
+import { enforceJustChatAccess } from './util/justChatAccess';
 
-const APP_LOCK_SESSION_KEY = 'app_lock_passed';
 const DISGUISE_TITLE = 'home';
 const FAVICON_SIZE = 64;
 
-bootstrap();
+void bootstrap();
 
-function bootstrap() {
+async function bootstrap() {
   if (!(window as any).isCompatTestPassed) return;
 
-  if (sessionStorage.getItem(APP_LOCK_SESSION_KEY) === '1') {
+  // Restricted users must leave before the PWA lock screen, including a cold tap of the app icon.
+  const access = await enforceJustChatAccess();
+  if (access === 'denied') {
+    return;
+  }
+
+  // Return from Blockerino Cancel (or ?requireLock=1) must show the PIN again.
+  consumeRequireLockQuery();
+
+  if (localStorage.getItem(APP_LOCK_STORAGE_KEY) === '1') {
     void startMainApp();
     return;
   }
@@ -29,7 +39,7 @@ function bootstrap() {
 }
 
 function handleAppUnlock() {
-  sessionStorage.setItem(APP_LOCK_SESSION_KEY, '1');
+  localStorage.setItem(APP_LOCK_STORAGE_KEY, '1');
   void startMainApp();
 }
 

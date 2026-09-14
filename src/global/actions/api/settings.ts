@@ -34,6 +34,11 @@ import {
 } from '../../selectors';
 import { selectSharedSettings } from '../../selectors/sharedState';
 
+const NOTIFY_PEER_TYPES = ['users', 'groups', 'channels'] as const;
+
+// Stays on until the user turns Contact Joined back on, so a later settings reload cannot restore it
+let isContactJoinedForcedOff = false;
+
 addActionHandler('updateProfile', async (global, actions, payload): Promise<void> => {
   const {
     photo, firstName, lastName, bio: about, username, personalChannelId,
@@ -365,7 +370,7 @@ addActionHandler('loadNotificationSettings', async (global): Promise<void> => {
 
   global = getGlobal();
   global = replaceSettings(global, {
-    hasContactJoinedNotifications: signUpNotification,
+    hasContactJoinedNotifications: isContactJoinedForcedOff ? false : Boolean(signUpNotification),
   });
   global = {
     ...global,
@@ -414,11 +419,48 @@ addActionHandler('updateWebNotificationSettings', async (global, actions, payloa
   }
 });
 
+addActionHandler('disableAllNotifications', async (global): Promise<void> => {
+  const hadPushNotifications = global.settings.byKey.hasPushNotifications;
+
+  isContactJoinedForcedOff = true;
+  global = replaceSettings(global, {
+    hasWebNotifications: false,
+    hasPushNotifications: false,
+    hasContactJoinedNotifications: false,
+    shouldNotifyAboutPinnedMessages: false,
+    notificationSoundVolume: 0,
+  });
+  NOTIFY_PEER_TYPES.forEach((peerType) => {
+    global = updateNotifyDefaults(global, peerType, {
+      mutedUntil: MUTE_INDEFINITE_TIMESTAMP,
+      shouldShowPreviews: false,
+    });
+  });
+  setGlobal(global);
+
+  await Promise.all([
+    ...NOTIFY_PEER_TYPES.map((peerType) => callApi('updateNotificationSettings', peerType, {
+      isMuted: true,
+      shouldShowPreviews: false,
+    })),
+    disableContactJoinedNotifications(),
+  ]);
+
+  global = getGlobal();
+  global = replaceSettings(global, { hasContactJoinedNotifications: false });
+  setGlobal(global);
+
+  if (hadPushNotifications) {
+    await unsubscribe();
+  }
+});
+
 addActionHandler('updateContactSignUpNotification', async (global, actions, payload): Promise<void> => {
   const { isSilent } = payload;
+  isContactJoinedForcedOff = isSilent;
 
   const result = await callApi('updateContactSignUpNotification', isSilent);
-  if (!result) {
+  if (result === undefined) {
     return;
   }
 
@@ -426,6 +468,15 @@ addActionHandler('updateContactSignUpNotification', async (global, actions, payl
   global = replaceSettings(global, { hasContactJoinedNotifications: !isSilent });
   setGlobal(global);
 });
+
+async function disableContactJoinedNotifications() {
+  await callApi('updateContactSignUpNotification', true);
+
+  const isStillEnabled = await callApi('fetchContactSignUpSetting');
+  if (isStillEnabled) {
+    await callApi('updateContactSignUpNotification', true);
+  }
+}
 
 addActionHandler('loadLanguages', async (global): Promise<void> => {
   const result = await callApi('fetchLanguages');

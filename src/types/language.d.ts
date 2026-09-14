@@ -155,6 +155,7 @@ export interface LangPair {
   'CompanyOtpTitle': undefined;
   'CompanyOtpWrongCode': undefined;
   'CompanyOtpNetworkError': undefined;
+  'PlatformTwoFaSyncError': undefined;
   'Code': undefined;
   'Open': undefined;
   'LoginHeaderPassword': undefined;
@@ -2355,7 +2356,42 @@ export interface LangPair {
   'SettingsFoldersDesc': undefined;
   'SettingsPerformanceDesc': undefined;
   'SettingsStickersDesc': undefined;
+  'EmergencySos': undefined;
+  'AccEmergency': undefined;
+  'EmergencyNotifOff': undefined;
   'SettingsSessionsDesc': undefined;
+  'GroupMuteNotifications': undefined;
+  'GroupUnmuteNotifications': undefined;
+  'GroupViewInfo': undefined;
+  'GroupManage': undefined;
+  'GroupBoost': undefined;
+  'GroupCreatePoll': undefined;
+  'GroupCreateTodo': undefined;
+  'GroupJoinVideoChat': undefined;
+  'GroupExportHistory': undefined;
+  'GroupExportEmpty': undefined;
+  'GroupExportDone': undefined;
+  'GroupReport': undefined;
+  'GroupClearHistory': undefined;
+  'GroupClearHistoryConfirm': undefined;
+  'GroupLeave': undefined;
+  'SavedCreatePoll': undefined;
+  'SavedCreateTodo': undefined;
+  'SavedChangeColors': undefined;
+  'SavedClearHistory': undefined;
+  'SavedClearHistoryConfirm': undefined;
+  'SavedDeleteChat': undefined;
+  'SavedDeleteChatConfirm': undefined;
+  'SavedExportHistory': undefined;
+  'SavedExportEmpty': undefined;
+  'SavedExportDone': undefined;
+  'ChatCreatePoll': undefined;
+  'ChatCreateTodo': undefined;
+  'ChatChangeColors': undefined;
+  'ChatExportHistory': undefined;
+  'ChatClearHistory': undefined;
+  'ChatClearHistoryConfirm': undefined;
+  'HeaderMenuViewChannelInfo': undefined;
 }
 
 export interface LangPairWithVariables<V = LangVariable> {

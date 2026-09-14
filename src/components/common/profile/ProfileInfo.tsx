@@ -24,6 +24,7 @@ import {
 import { getActions, withGlobal } from '../../../global/index';
 import {
   selectChat,
+  selectChatOnlineCount,
   selectCurrentMessageList,
   selectCustomEmoji,
   selectPeer,
@@ -78,6 +79,7 @@ type OwnProps = {
   canPlayVideo: boolean;
   isForMonoforum?: boolean;
   onExpand?: NoneToVoidFunction;
+  onMembersClick?: NoneToVoidFunction;
 };
 
 type StateProps = {
@@ -89,6 +91,7 @@ type StateProps = {
   avatarOwnerId?: string;
   topic?: ApiTopic;
   messagesCount?: number;
+  onlineCount?: number;
   animationLevel: AnimationLevel;
   emojiStatus?: ApiEmojiStatusType;
   emojiStatusSticker?: ApiSticker;
@@ -126,6 +129,7 @@ const ProfileInfo = ({
   avatarOwnerId,
   topic,
   messagesCount,
+  onlineCount,
   animationLevel,
   emojiStatus,
   emojiStatusSticker,
@@ -140,6 +144,7 @@ const ProfileInfo = ({
   hasAvatar,
   isSystemAccount,
   onExpand,
+  onMembersClick,
 }: OwnProps & StateProps) => {
   const {
     openMediaViewer,
@@ -466,19 +471,34 @@ const ProfileInfo = ({
       );
     }
 
+    const memberStatus = isChatChannel(chat!)
+      ? oldLang('Subscribers', chat!.membersCount ?? 0, 'i')
+      : oldLang('Members', chat!.membersCount ?? 0, 'i');
+    const onlineStatus = onlineCount
+      ? lang('OnlineCount', { count: onlineCount }, { pluralValue: onlineCount })
+      : undefined;
+
     return (
       <span
-        className={buildClassName(styles.status, 'status')}
+        role={onMembersClick ? 'button' : undefined}
+        tabIndex={onMembersClick ? 0 : undefined}
+        className={buildClassName(styles.status, 'status', onMembersClick && styles.clickableStatus)}
         dir="auto"
         style={createVtnStyle('status', true)}
+        onClick={onMembersClick}
+        onKeyDown={onMembersClick ? handleMembersKeyDown : undefined}
       >
-        {
-          isChatChannel(chat!)
-            ? oldLang('Subscribers', chat!.membersCount ?? 0, 'i')
-            : oldLang('Members', chat!.membersCount ?? 0, 'i')
-        }
+        {onlineStatus
+          ? lang('GroupStatusWithOnline', { status: memberStatus, onlineCount: onlineStatus })
+          : memberStatus}
       </span>
     );
+  }
+
+  function handleMembersKeyDown(e: React.KeyboardEvent<HTMLSpanElement>) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    onMembersClick?.();
   }
 
   if (topic) {
@@ -660,6 +680,7 @@ export default memo(withGlobal<OwnProps>(
       profilePhotos,
       topic,
       messagesCount: topic ? selectThreadMessagesCount(global, peerId, topic.id) : undefined,
+      onlineCount: chat ? selectChatOnlineCount(global, chat) : undefined,
       profileColorOption: profileColor,
       theme,
       isPlain: !hasBackground,

@@ -238,7 +238,7 @@ export default defineConfig(({ mode }): UserConfig => {
           changeOrigin: true,
         },
         '/platform-api': {
-          target: env.PLATFORM_API_ORIGIN || 'https://main.dhfko7aevmlgq.amplifyapp.com',
+          target: env.PLATFORM_API_ORIGIN || 'https://staging.dhfko7aevmlgq.amplifyapp.com',
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/platform-api/, ''),
         },

@@ -29,6 +29,7 @@ export type OwnProps = {
   isOpen: boolean;
   chat: ApiChat;
   isSavedDialog?: boolean;
+  isClearHistory?: boolean;
   onClose: () => void;
   onCloseAnimationEnd?: () => void;
 };
@@ -49,6 +50,7 @@ const DeleteChatModal = ({
   isOpen,
   chat,
   isSavedDialog,
+  isClearHistory,
   isChannel,
   isPrivateChat,
   isChatWithSelf,
@@ -75,6 +77,11 @@ const DeleteChatModal = ({
   const oldLang = useOldLang();
   const lang = useLang();
   const chatTitle = getChatTitle(lang, chat);
+
+  const handleClearHistory = useLastCallback(() => {
+    deleteHistory({ chatId: chat.id, shouldDeleteForAll: false, shouldKeepChat: true });
+    onClose();
+  });
 
   const handleDeleteForAll = useLastCallback(() => {
     deleteHistory({ chatId: chat.id, shouldDeleteForAll: true });
@@ -130,12 +137,35 @@ const DeleteChatModal = ({
           peer={chat}
           isSavedMessages={isChatWithSelf}
         />
-        <h3 className="modal-title">{oldLang(renderTitle())}</h3>
+        <h3 className="modal-title">{renderModalTitle()}</h3>
       </div>
     );
   }
 
+  function renderModalTitle() {
+    const titleKey = renderTitle();
+    if (
+      titleKey === 'ChatClearHistory'
+      || titleKey === 'GroupClearHistory'
+      || titleKey === 'SavedClearHistory'
+      || titleKey === 'SavedDeleteChat'
+    ) {
+      return lang(titleKey);
+    }
+
+    return oldLang(titleKey);
+  }
+
   function renderTitle() {
+    if (isClearHistory) {
+      if (isChatWithSelf) return 'SavedClearHistory';
+      return isBasicGroup || isSuperGroup ? 'GroupClearHistory' : 'ChatClearHistory';
+    }
+
+    if (isChatWithSelf && !isSavedDialog) {
+      return 'SavedDeleteChat';
+    }
+
     if (isSavedDialog) {
       return isChatWithSelf ? 'ClearHistoryMyNotesTitle' : 'ClearHistoryTitleSingle2';
     }
@@ -156,6 +186,19 @@ const DeleteChatModal = ({
   }
 
   function renderContent() {
+    if (isClearHistory) {
+      if (isChatWithSelf) return <p>{lang('SavedClearHistoryConfirm')}</p>;
+      return (
+        <p>
+          {lang(isBasicGroup || isSuperGroup ? 'GroupClearHistoryConfirm' : 'ChatClearHistoryConfirm')}
+        </p>
+      );
+    }
+
+    if (isChatWithSelf && !isSavedDialog) {
+      return <p>{lang('SavedDeleteChatConfirm')}</p>;
+    }
+
     if (isSavedDialog) {
       return (
         <p>
@@ -181,7 +224,30 @@ const DeleteChatModal = ({
     return <p>{renderText(oldLang('ChatList.DeleteChatConfirmation', contactName), ['simple_markdown', 'emoji'])}</p>;
   }
 
+  function renderActionLabel() {
+    const titleKey = renderActionText();
+    if (
+      titleKey === 'ChatClearHistory'
+      || titleKey === 'GroupClearHistory'
+      || titleKey === 'SavedClearHistory'
+      || titleKey === 'SavedDeleteChat'
+    ) {
+      return lang(titleKey);
+    }
+
+    return oldLang(titleKey);
+  }
+
   function renderActionText() {
+    if (isClearHistory) {
+      if (isChatWithSelf) return 'SavedClearHistory';
+      return isBasicGroup || isSuperGroup ? 'GroupClearHistory' : 'ChatClearHistory';
+    }
+
+    if (isChatWithSelf && !isSavedDialog) {
+      return 'SavedDeleteChat';
+    }
+
     if (isSavedDialog) {
       return 'Delete';
     }
@@ -210,17 +276,17 @@ const DeleteChatModal = ({
     >
       {renderContent()}
       <div className="dialog-buttons-column">
-        {isBot && !isSavedDialog && (
+        {isBot && !isSavedDialog && !isClearHistory && (
           <Button color="danger" className="confirm-dialog-button" isText onClick={handleDeleteAndStop}>
             {oldLang('DeleteAndStop')}
           </Button>
         )}
-        {canDeleteForAll && (
+        {canDeleteForAll && !isClearHistory && (
           <Button color="danger" className="confirm-dialog-button" isText onClick={handleDeleteForAll}>
             {contactName ? renderText(oldLang('ChatList.DeleteForEveryone', contactName)) : oldLang('DeleteForAll')}
           </Button>
         )}
-        {!isPrivateChat && chat.isCreator && !isSavedDialog && (
+        {!isPrivateChat && chat.isCreator && !isSavedDialog && !isClearHistory && (
           <Button color="danger" className="confirm-dialog-button" isText onClick={handleDeleteChat}>
             {oldLang('DeleteForAll')}
           </Button>
@@ -229,9 +295,11 @@ const DeleteChatModal = ({
           color="danger"
           className="confirm-dialog-button"
           isText
-          onClick={(isPrivateChat || isSavedDialog) ? handleDeleteChat : handleLeaveChat}
+          onClick={isClearHistory
+            ? handleClearHistory
+            : ((isPrivateChat || isSavedDialog) ? handleDeleteChat : handleLeaveChat)}
         >
-          {oldLang(renderActionText())}
+          {renderActionLabel()}
         </Button>
         <Button className="confirm-dialog-button" isText onClick={onClose}>{oldLang('Cancel')}</Button>
       </div>

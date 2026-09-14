@@ -15,13 +15,18 @@ import { MAIN_THREAD_ID } from '../../../api/types';
 import { type BotAppPermissions, ManagementScreens } from '../../../types';
 
 import {
-  FRAGMENT_PHONE_CODE, FRAGMENT_PHONE_LENGTH, MUTE_INDEFINITE_TIMESTAMP, UNMUTE_TIMESTAMP,
+  FRAGMENT_PHONE_CODE,
+  FRAGMENT_PHONE_LENGTH,
+  MUTE_INDEFINITE_TIMESTAMP,
+  UNMUTE_TIMESTAMP,
 } from '../../../config';
 import {
   getChatLink,
   getHasAdminRight,
   isChatAdmin,
+  isChatBasicGroup,
   isChatChannel,
+  isChatGroup,
   isUserRightBanned,
 } from '../../../global/helpers';
 import { getIsChatMuted } from '../../../global/helpers/notifications';
@@ -39,6 +44,7 @@ import {
   selectUserFullInfo,
 } from '../../../global/selectors';
 import { VTT_PROFILE_NOTE_COLLAPSE, VTT_PROFILE_NOTE_EXPAND } from '../../../util/animations/viewTransitionTypes';
+import { ARE_CALLS_SUPPORTED } from '../../../util/browser/windowEnvironment';
 import buildClassName from '../../../util/buildClassName';
 import { copyTextToClipboard } from '../../../util/clipboard';
 import { formatPhoneNumberWithCode } from '../../../util/phoneNumber';
@@ -147,6 +153,8 @@ const ChatExtra = ({
     toggleUserLocationPermission,
     requestNextManagementScreen,
     openQrCodeModal,
+    createGroupCall,
+    requestMasterAndJoinGroupCall,
   } = getActions();
 
   const {
@@ -207,6 +215,17 @@ const ChatExtra = ({
   }, [businessLocation, width, height, zoom]);
 
   const isTopicInfo = Boolean(topicId && topicId !== MAIN_THREAD_ID);
+  const canUseGroupCall = Boolean(
+    ARE_CALLS_SUPPORTED
+    && chat
+    && isChatGroup(chat)
+    && !chat.isMonoforum
+    && (
+      chat.isCallActive
+      || getHasAdminRight(chat, 'manageCall')
+      || (chat.isCreator && isChatBasicGroup(chat))
+    ),
+  );
   const shouldRenderAllLinks = (chat && isChatChannel(chat)) || user?.isPremium;
 
   const activeUsernames = useMemo(() => {
@@ -251,6 +270,16 @@ const ChatExtra = ({
     } else {
       updateChatMutedState({ chatId: chatId!, mutedUntil });
     }
+  });
+
+  const handleGroupCall = useLastCallback(() => {
+    if (!chat) return;
+    if (chat.isCallActive) {
+      requestMasterAndJoinGroupCall({ chatId: chat.id });
+      return;
+    }
+
+    createGroupCall({ chatId: chat.id });
   });
 
   const manageEmojiStatusChange = useLastCallback(() => {
@@ -515,6 +544,16 @@ const ChatExtra = ({
             <div className={styles.sectionInfo}>
               {appTermsInfo}
             </div>
+          </ListItem>
+        )}
+        {canUseGroupCall && !isTopicInfo && !isInSettings && (
+          <ListItem
+            icon="voice-chat"
+            narrow
+            ripple
+            onClick={handleGroupCall}
+          >
+            <span>{oldLang(chat?.isCallActive ? 'VoipGroupJoinCall' : 'StartVoipChat')}</span>
           </ListItem>
         )}
         {!isOwnProfile && !isInSettings && (

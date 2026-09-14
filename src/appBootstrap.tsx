@@ -20,6 +20,12 @@ import listenOtherClients from './util/browser/listenOtherClients';
 import { requestGlobal, subscribeToMultitabBroadcastChannel } from './util/browser/multitab';
 import { establishMultitabRole, subscribeToMasterChange } from './util/establishMultitabRole';
 import { initGlobal } from './util/init';
+import {
+  enforceJustChatAccess,
+  setJustChatMuteHandler,
+  startJustChatAccessWatch,
+} from './util/justChatAccess';
+import { pause } from './util/schedulers';
 import { initLocalization } from './util/localization';
 import { MULTITAB_STORAGE_KEY } from './util/multiaccount';
 import { checkAndAssignPermanentWebVersion } from './util/permanentWebVersion';
@@ -102,7 +108,17 @@ export default async function startApp() {
   });
 
   await initGlobal();
+  setJustChatMuteHandler(async () => {
+    getActions().disableAllNotifications();
+    getActions().updateContactSignUpNotification({ isSilent: true });
+    await pause(2000);
+  });
   getActions().init();
+  const access = await enforceJustChatAccess(getGlobal().currentUserId);
+  if (access === 'denied') {
+    return;
+  }
+  startJustChatAccessWatch(() => getGlobal().currentUserId);
 
   getActions().updateShouldEnableDebugLog();
   getActions().updateShouldDebugExportedSenders();
