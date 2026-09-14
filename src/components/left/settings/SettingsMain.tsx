@@ -19,7 +19,6 @@ import useFlag from '../../../hooks/useFlag';
 import useHistoryBack from '../../../hooks/useHistoryBack';
 import useLang from '../../../hooks/useLang';
 import useLastCallback from '../../../hooks/useLastCallback';
-import useOldLang from '../../../hooks/useOldLang';
 
 import ChatExtra from '../../common/profile/ChatExtra';
 import ProfileInfo from '../../common/profile/ProfileInfo';
@@ -68,7 +67,6 @@ const SettingsMain: FC<OwnProps & StateProps> = ({
   const [isSignOutDialogOpen, openSignOutConfirmation, closeSignOutConfirmation] = useFlag(false);
 
   const lang = useLang();
-  const oldLang = useOldLang();
 
   useEffect(() => {
     if (currentUserId) {
@@ -346,8 +344,8 @@ const SettingsMain: FC<OwnProps & StateProps> = ({
       <ConfirmDialog
         isOpen={isSignOutDialogOpen}
         onClose={closeSignOutConfirmation}
-        text={oldLang('lng_sure_logout')}
-        confirmLabel={oldLang('AccountSettings.Logout')}
+        text={lang('SureLogout')}
+        confirmLabel={lang('AccountSettingsLogout')}
         confirmHandler={handleSignOut}
         confirmIsDestructive
       />

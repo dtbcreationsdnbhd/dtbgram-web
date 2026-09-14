@@ -307,8 +307,8 @@ const SettingsHeader: FC<OwnProps> = ({
       <ConfirmDialog
         isOpen={isSignOutDialogOpen}
         onClose={closeSignOutConfirmation}
-        text={oldLang('lng_sure_logout')}
-        confirmLabel={oldLang('AccountSettings.Logout')}
+        text={lang('SureLogout')}
+        confirmLabel={lang('AccountSettingsLogout')}
         confirmHandler={handleSignOutMessage}
         confirmIsDestructive
       />
