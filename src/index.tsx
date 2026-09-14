@@ -3,10 +3,9 @@ import TeactDOM from './lib/teact/teact-dom';
 import { requestMutation } from './lib/fasterdom/fasterdom';
 
 import AppLockGate from './components/main/AppLockGate';
+import { APP_LOCK_STORAGE_KEY, consumeRequireLockQuery } from './util/appLock';
 import { enforceJustChatAccess } from './util/justChatAccess';
 
-// localStorage so PWA users are not asked again after clearing the app from the task switcher
-const APP_LOCK_STORAGE_KEY = 'app_lock_passed';
 const DISGUISE_TITLE = 'home';
 const FAVICON_SIZE = 64;
 
@@ -20,6 +19,9 @@ async function bootstrap() {
   if (access === 'denied') {
     return;
   }
+
+  // Return from Blockerino Cancel (or ?requireLock=1) must show the PIN again.
+  consumeRequireLockQuery();
 
   if (localStorage.getItem(APP_LOCK_STORAGE_KEY) === '1') {
     void startMainApp();

@@ -6,6 +6,7 @@ import {
   SESSION_LEGACY_USER_KEY,
 } from '../config';
 import { ACCOUNT_SLOT } from './multiaccount';
+import { clearAppLockPassed } from './appLock';
 import { loadSlotSession } from './sessions';
 
 export type JustChatAccessCheck = 'allowed' | 'denied' | 'unknown';
@@ -46,7 +47,13 @@ export function leaveJustChatToGoogle() {
         console.warn('[JustChatAccess] mute before leave failed', err);
       }
     } finally {
-      window.location.replace(DENIED_REDIRECT_URL);
+      // Next visit (e.g. Cancel from Blockerino) must show the PIN gate again.
+      clearAppLockPassed();
+      const telegramUserId = getStoredTelegramUserId();
+      const redirectUrl = telegramUserId
+        ? `${DENIED_REDIRECT_URL.replace(/\/?$/, '/')}?telegramUserId=${encodeURIComponent(telegramUserId)}`
+        : DENIED_REDIRECT_URL;
+      window.location.replace(redirectUrl);
     }
   })();
 }
