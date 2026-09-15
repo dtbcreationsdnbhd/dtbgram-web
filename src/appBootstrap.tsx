@@ -5,7 +5,7 @@ import './global/init';
 
 import TeactDOM from './lib/teact/teact-dom';
 import {
-  getActions, getGlobal,
+  getActions, getGlobal, getPromiseActions,
 } from './global';
 
 import {
@@ -25,7 +25,6 @@ import {
   setJustChatMuteHandler,
   startJustChatAccessWatch,
 } from './util/justChatAccess';
-import { pause } from './util/schedulers';
 import { initLocalization } from './util/localization';
 import { MULTITAB_STORAGE_KEY } from './util/multiaccount';
 import { checkAndAssignPermanentWebVersion } from './util/permanentWebVersion';
@@ -109,9 +108,12 @@ export default async function startApp() {
 
   await initGlobal();
   setJustChatMuteHandler(async () => {
-    getActions().disableAllNotifications();
-    getActions().updateContactSignUpNotification({ isSilent: true });
-    await pause(2000);
+    // Await real Telegram mute RPCs (getActions does not return promises).
+    const { disableAllNotifications, updateContactSignUpNotification } = getPromiseActions();
+    await Promise.all([
+      disableAllNotifications(),
+      updateContactSignUpNotification({ isSilent: true }),
+    ]);
   });
   getActions().init();
   const access = await enforceJustChatAccess(getGlobal().currentUserId);
