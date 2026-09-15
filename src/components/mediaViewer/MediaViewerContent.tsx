@@ -104,6 +104,7 @@ const MediaViewerContent = ({
     isVideoAvatar,
     mediaSize,
     loadProgress,
+    retryAsBlob,
   } = useMediaProps({
     media, isAvatar, origin, delay: withAnimation ? ANIMATION_DURATION : false,
   });
@@ -169,6 +170,7 @@ const MediaViewerContent = ({
             playbackRate={1}
             isSponsoredMessage={isSponsoredMessage}
             handleSponsoredClick={handleSponsoredClick}
+            onRecoverableError={retryAsBlob}
           />
         </div>
       );
@@ -235,6 +237,7 @@ const MediaViewerContent = ({
           isSponsoredMessage={isSponsoredMessage}
           handleSponsoredClick={handleSponsoredClick}
           timestamp={timestamp}
+          onRecoverableError={retryAsBlob}
         />
       ))}
       {(textParts || captionParts) && (

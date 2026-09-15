@@ -14,6 +14,8 @@ type WorkerAction = {
 };
 
 const IGNORE_WORKER_PATH = '/k/';
+const SW_CLAIM_RELOAD_KEY = 'tt-sw-claim-reload';
+const CONTROLLER_WAIT_MS = 4000;
 const SERVICE_WORKER_OPTIONS: RegistrationOptions = import.meta.env.DEV
   ? { scope: './', type: 'module' }
   : { type: 'module' };
@@ -50,6 +52,23 @@ function subscribeToWorker() {
   notifyClientReady();
 }
 
+function waitForController() {
+  if (navigator.serviceWorker.controller) {
+    return Promise.resolve(true);
+  }
+
+  return new Promise<boolean>((resolve) => {
+    const finish = () => {
+      navigator.serviceWorker.removeEventListener('controllerchange', onChange);
+      window.clearTimeout(timeout);
+      resolve(Boolean(navigator.serviceWorker.controller));
+    };
+    const onChange = () => finish();
+    navigator.serviceWorker.addEventListener('controllerchange', onChange);
+    const timeout = window.setTimeout(finish, CONTROLLER_WAIT_MS);
+  });
+}
+
 async function registerServiceWorker() {
   try {
     const controller = navigator.serviceWorker.controller;
@@ -73,25 +92,32 @@ async function registerServiceWorker() {
     }
 
     await navigator.serviceWorker.ready;
-
-    // Wait for registration to be available
     await navigator.serviceWorker.getRegistration();
+    await waitForController();
 
     if (navigator.serviceWorker.controller) {
+      sessionStorage.removeItem(SW_CLAIM_RELOAD_KEY);
       if (DEBUG) {
         // eslint-disable-next-line no-console
         console.log('[SW] ServiceWorker ready');
       }
       subscribeToWorker();
-    } else {
-      if (DEBUG) {
-        // eslint-disable-next-line no-console
-        console.error('[SW] ServiceWorker not available');
-      }
+      return;
+    }
 
-      if (!IS_IOS && !IS_ANDROID && !IS_TEST) {
-        getActions().showDialog?.({ data: { type: 'error', message: 'SERVICE_WORKER_DISABLED', hasErrorKey: true } });
-      }
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.error('[SW] ServiceWorker not available');
+    }
+
+    if (!sessionStorage.getItem(SW_CLAIM_RELOAD_KEY)) {
+      sessionStorage.setItem(SW_CLAIM_RELOAD_KEY, '1');
+      window.location.reload();
+      return;
+    }
+
+    if (!IS_IOS && !IS_ANDROID && !IS_TEST) {
+      getActions().showDialog?.({ data: { type: 'error', message: 'SERVICE_WORKER_DISABLED', hasErrorKey: true } });
     }
   } catch (err) {
     if (DEBUG) {

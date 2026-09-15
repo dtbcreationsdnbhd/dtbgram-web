@@ -1,4 +1,4 @@
-import { useMemo } from '../../../lib/teact/teact';
+import { useEffect, useMemo } from '../../../lib/teact/teact';
 
 import type { MediaViewerMedia } from '../../../types';
 import { ApiMediaFormat } from '../../../api/types';
@@ -20,6 +20,7 @@ import {
 import { AVATAR_FULL_DIMENSIONS, VIDEO_AVATAR_FULL_DIMENSIONS } from '../../common/helpers/mediaDimensions';
 
 import useBlurSync from '../../../hooks/useBlurSync';
+import useFlag from '../../../hooks/useFlag';
 import useMedia from '../../../hooks/useMedia';
 import useMediaWithLoadProgress from '../../../hooks/useMediaWithLoadProgress';
 
@@ -47,7 +48,16 @@ export const useMediaProps = ({
   const isFromSharedMedia = origin === MediaViewerOrigin.SharedMedia;
   const isFromSearch = origin === MediaViewerOrigin.SearchResult;
 
+  const [shouldForceBlob, markForceBlob, unmarkForceBlob] = useFlag();
+
+  useEffect(() => {
+    unmarkForceBlob();
+  }, [media?.id]);
+
   const contentType = media && getMediaSearchType(media);
+  const fullMediaFormat = media && (
+    shouldForceBlob ? ApiMediaFormat.BlobUrl : getMediaFormat(media, 'full')
+  );
 
   const getMediaOrAvatarHash = useMemo(() => (isFull?: boolean) => {
     if (!media) return undefined;
@@ -85,7 +95,7 @@ export const useMediaProps = ({
   } = useMediaWithLoadProgress(
     getMediaOrAvatarHash(true),
     undefined,
-    media && getMediaFormat(media, 'full'),
+    fullMediaFormat,
     delay,
   );
 
@@ -138,5 +148,6 @@ export const useMediaProps = ({
     isVideoAvatar,
     loadProgress,
     mediaSize,
+    retryAsBlob: shouldForceBlob ? undefined : markForceBlob,
   };
 };

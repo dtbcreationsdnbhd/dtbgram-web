@@ -136,6 +136,7 @@ export interface ApiVideo {
   noSound?: boolean;
   waveform?: number[];
   timestamp?: number;
+  videoCodec?: string;
   altVideos?: ApiVideo[];
   storyboardInfo?: StoryboardInfo;
 }
