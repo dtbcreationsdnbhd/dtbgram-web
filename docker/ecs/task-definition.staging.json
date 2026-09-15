@@ -22,7 +22,7 @@
       "environment": [
         {
           "name": "PLATFORM_API_UPSTREAM",
-          "value": "https://main.dhfko7aevmlgq.amplifyapp.com"
+          "value": "https://staging.dhfko7aevmlgq.amplifyapp.com"
         },
         {
           "name": "INTERNAL_AUTH_API_UPSTREAM",

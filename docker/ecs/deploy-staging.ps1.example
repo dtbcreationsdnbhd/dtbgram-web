@@ -15,7 +15,7 @@ docker build -t dtbgram-web:staging `
   --build-arg APP_ENV=staging `
   --build-arg HEAD=staging `
   --build-arg PLATFORM_API_KEY_WEBSITE=<key> `
-  --build-arg PLATFORM_API_ORIGIN=https://main.dhfko7aevmlgq.amplifyapp.com `
+  --build-arg PLATFORM_API_ORIGIN=https://staging.dhfko7aevmlgq.amplifyapp.com `
   .
 
 docker tag dtbgram-web:staging 277715911124.dkr.ecr.ap-southeast-1.amazonaws.com/dtbgram-web:staging

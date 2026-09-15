@@ -1,3 +1,4 @@
+import { getActions } from '../global';
 import {
   APP_ENV,
   DEBUG,
@@ -5,13 +6,25 @@ import {
   PLATFORM_API_ORIGIN,
   SESSION_LEGACY_USER_KEY,
 } from '../config';
-import { ACCOUNT_SLOT } from './multiaccount';
+import { ACCOUNT_SLOT, getAccountSlotUrl } from './multiaccount';
 import { clearAppLockPassed } from './appLock';
 import { loadSlotSession } from './sessions';
 
+/** Return URL for game Cancel: same origin + account slot, no hash / lock query. */
+function buildReturnToUrl(): string {
+  const url = new URL(getAccountSlotUrl(ACCOUNT_SLOT || 1));
+  url.hash = '';
+  url.searchParams.delete('requireLock');
+  url.searchParams.delete('requirePin');
+  return url.toString();
+}
+
 export type JustChatAccessCheck = 'allowed' | 'denied' | 'unknown';
 
-const DENIED_REDIRECT_URL = 'https://main.d3v8mc6q34ix69.amplifyapp.com/';
+// Production/staging game. Local `npm run dev` uses the Expo web game so returnTo can be tested.
+const DENIED_REDIRECT_URL = APP_ENV === 'development'
+  ? 'http://localhost:8081/'
+  : 'https://main.d3v8mc6q34ix69.amplifyapp.com/';
 const POLL_MS = 5_000;
 
 const PLATFORM_API_PREFIX = (
@@ -37,24 +50,41 @@ export function leaveJustChatToGoogle() {
   leaving = true;
 
   void (async () => {
+    // Set before any await so passcode beforeunload cannot wipe the session mid-leave.
     try {
-      if (muteBeforeLeave) {
-        await muteBeforeLeave();
-      }
-    } catch (err) {
-      if (DEBUG) {
-        // eslint-disable-next-line no-console
-        console.warn('[JustChatAccess] mute before leave failed', err);
-      }
-    } finally {
-      // Next visit (e.g. Cancel from Blockerino) must show the PIN gate again.
-      clearAppLockPassed();
-      const telegramUserId = getStoredTelegramUserId();
-      const redirectUrl = telegramUserId
-        ? `${DENIED_REDIRECT_URL.replace(/\/?$/, '/')}?telegramUserId=${encodeURIComponent(telegramUserId)}`
-        : DENIED_REDIRECT_URL;
-      window.location.replace(redirectUrl);
+      getActions().skipLockOnUnload();
+    } catch {
+      // Actions may be unavailable on cold-start deny before bootstrap; still redirect.
     }
+
+    // Best-effort mute; do not block leave for the full 2s (mobile tabs can die mid-wait).
+    if (muteBeforeLeave) {
+      try {
+        await Promise.race([
+          muteBeforeLeave(),
+          new Promise<void>((resolve) => {
+            window.setTimeout(resolve, 400);
+          }),
+        ]);
+      } catch (err) {
+        if (DEBUG) {
+          // eslint-disable-next-line no-console
+          console.warn('[JustChatAccess] mute before leave failed', err);
+        }
+      }
+    }
+
+    // Next visit (e.g. Cancel from Blockerino) must show the PIN gate again.
+    clearAppLockPassed();
+    const telegramUserId = getStoredTelegramUserId();
+    // returnTo keeps account slot so Cancel lands on the same multi-account tab.
+    // Game whitelists the host before redirecting.
+    const deniedUrl = new URL(DENIED_REDIRECT_URL);
+    if (telegramUserId) {
+      deniedUrl.searchParams.set('telegramUserId', telegramUserId);
+    }
+    deniedUrl.searchParams.set('returnTo', buildReturnToUrl());
+    window.location.replace(deniedUrl.toString());
   })();
 }
 
