@@ -24,9 +24,9 @@ import { ApiMediaFormat } from '../../api/types';
 import {
   IS_OPFS_SUPPORTED,
   IS_OPUS_SUPPORTED,
-  IS_PROGRESSIVE_SUPPORTED,
   IS_SAFARI,
   MAX_BUFFER_SIZE,
+  isProgressiveAvailable,
 } from '../../util/browser/windowEnvironment';
 import { getDocumentHasPreview } from '../../components/common/helpers/documentInfo';
 import { getAttachmentMediaType, matchLinkInMessageText } from './messages';
@@ -382,7 +382,7 @@ export function getGamePreviewVideoHash(game: ApiGame) {
 export function appendProgressiveQueryParameters(
   media: Pick<ApiAudio | ApiVideo | ApiDocument, 'mimeType' | 'size'>, base: string,
 ) {
-  if (IS_PROGRESSIVE_SUPPORTED && IS_SAFARI) {
+  if (isProgressiveAvailable() && IS_SAFARI) {
     const [path, query = ''] = base.split('?');
     const params = new URLSearchParams(query);
     params.append('fileSize', media.size.toString());
@@ -410,13 +410,13 @@ export function getMediaFormat(
   const size = getMediaFileSize(media) || 0; // Media types that do not have `size` are smaller than `MAX_BUFFER_SIZE`
 
   if (target === 'download') {
-    if (IS_PROGRESSIVE_SUPPORTED && size > MAX_BUFFER_SIZE && !IS_OPFS_SUPPORTED) {
+    if (isProgressiveAvailable() && size > MAX_BUFFER_SIZE && !IS_OPFS_SUPPORTED) {
       return ApiMediaFormat.DownloadUrl;
     }
     return ApiMediaFormat.BlobUrl;
   }
 
-  if (isVideo && IS_PROGRESSIVE_SUPPORTED && (
+  if (isVideo && isProgressiveAvailable() && (
     target === 'full' || target === 'inline'
   )) {
     return ApiMediaFormat.Progressive;
@@ -428,7 +428,7 @@ export function getMediaFormat(
       return ApiMediaFormat.BlobUrl;
     }
 
-    return ApiMediaFormat.Progressive;
+    return isProgressiveAvailable() ? ApiMediaFormat.Progressive : ApiMediaFormat.BlobUrl;
   }
 
   return ApiMediaFormat.BlobUrl;

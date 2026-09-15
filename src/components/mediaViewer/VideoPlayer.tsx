@@ -52,6 +52,7 @@ type OwnProps = {
   timestamp?: number;
   handleSponsoredClick?: (isFromMedia?: boolean) => void;
   onClose: (e: React.MouseEvent<HTMLElement, MouseEvent>) => void;
+  onRecoverableError?: NoneToVoidFunction;
 };
 
 const MAX_LOOP_DURATION = 30; // Seconds
@@ -79,6 +80,7 @@ const VideoPlayer: FC<OwnProps> = ({
   timestamp,
   handleSponsoredClick,
   onClose,
+  onRecoverableError,
 }) => {
   const {
     setMediaViewerVolume,
@@ -163,7 +165,7 @@ const VideoPlayer: FC<OwnProps> = ({
   const {
     isReady, isBuffered, bufferedRanges, bufferingHandlers, bufferedProgress,
   } = useBuffering();
-  const isUnsupported = useUnsupportedMedia(videoRef, undefined, !url);
+  const isUnsupported = useUnsupportedMedia(videoRef, undefined, !url, onRecoverableError);
 
   const {
     shouldRender: shouldRenderSpinner,

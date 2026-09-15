@@ -33,9 +33,9 @@ export async function respondForProgressive(e: FetchEvent) {
   const { url } = e.request;
   const accountSlot = getAccountSlot(url);
   const range = e.request.headers.get('range');
-  const bytes = /^bytes=(\d+)-(\d+)?$/g.exec(range || '')!;
-  const start = Number(bytes[1]);
-  const originalEnd = Number(bytes[2]);
+  const bytes = /^bytes=(\d+)-(\d+)?$/g.exec(range || '');
+  const start = bytes ? Number(bytes[1]) : 0;
+  const originalEnd = Number(bytes?.[2]);
 
   let end = originalEnd;
   if (!end || (end - start + 1) > DEFAULT_PART_SIZE) {
@@ -153,7 +153,8 @@ export async function requestPart(
   params: { url: string; start: number; end: number },
 ): Promise<PartInfo | undefined> {
   const isDownload = params.url.includes('/download/');
-  const client = await (isDownload ? getClientForRequest(params.url) : self.clients.get(e.clientId));
+  const client = (isDownload ? undefined : await self.clients.get(e.clientId))
+    || await getClientForRequest(params.url);
   if (!client) {
     return undefined;
   }

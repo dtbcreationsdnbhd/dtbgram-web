@@ -13,7 +13,7 @@ import {
 } from '../config';
 import { callApi, cancelApiProgress } from '../api/gramjs';
 import {
-  IS_OPUS_SUPPORTED, IS_PROGRESSIVE_SUPPORTED,
+  IS_OPUS_SUPPORTED, IS_PROGRESSIVE_SUPPORTED, isProgressiveAvailable,
 } from './browser/windowEnvironment';
 import * as cacheApi from './cacheApi';
 import { fetchBlob } from './files';
@@ -45,7 +45,7 @@ export function fetch<T extends ApiMediaFormat>(
 ): Promise<ApiPreparedMedia> {
   if (mediaFormat === ApiMediaFormat.Progressive) {
     return (
-      IS_PROGRESSIVE_SUPPORTED
+      isProgressiveAvailable()
         ? Promise.resolve(getProgressiveUrl(url))
         : fetch(url, ApiMediaFormat.BlobUrl, isHtmlAllowed, onProgress, callbackUniqueId)
     );
@@ -53,7 +53,7 @@ export function fetch<T extends ApiMediaFormat>(
 
   if (mediaFormat === ApiMediaFormat.DownloadUrl) {
     return (
-      IS_PROGRESSIVE_SUPPORTED
+      isProgressiveAvailable()
         ? Promise.resolve(getDownloadUrl(url))
         : fetch(url, ApiMediaFormat.BlobUrl, isHtmlAllowed, onProgress, callbackUniqueId)
     );

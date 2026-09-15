@@ -1,8 +1,8 @@
 import { memo, useEffect, useRef, useState } from '../../../lib/teact/teact';
 import { getActions, withGlobal } from '../../../global';
 
-import type { ApiMediaExtendedPreview, ApiVideo } from '../../../api/types';
 import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
+import { type ApiMediaExtendedPreview, type ApiVideo, ApiMediaFormat } from '../../../api/types';
 
 import {
   getMediaDimensions, getMediaFormat, getMediaThumbUri, getMediaTransferState, getVideoMediaHash,
@@ -119,13 +119,21 @@ const Video = <T,>({
   const [isLoadAllowed, setIsLoadAllowed] = useState(canAutoLoad);
   const shouldLoad = Boolean(isLoadAllowed && isIntersectingForLoading && !isPaidPreview);
   const [isPlayAllowed, setIsPlayAllowed] = useState(Boolean(canAutoPlay && !isSpoilerShown));
+  const [shouldForceBlob, markForceBlob, unmarkForceBlob] = useFlag();
+
+  useEffect(() => {
+    unmarkForceBlob();
+  }, [video.mediaType === 'video' ? video.id : undefined]);
 
   const fullMediaHash = !isPaidPreview ? getVideoMediaHash(video, 'inline') : undefined;
   const [isFullMediaPreloaded] = useState(Boolean(fullMediaHash && mediaLoader.getFromMemory(fullMediaHash)));
+  const inlineMediaFormat = video.mediaType === 'video'
+    ? (shouldForceBlob ? ApiMediaFormat.BlobUrl : getMediaFormat(video, 'inline'))
+    : undefined;
   const { mediaData, loadProgress } = useMediaWithLoadProgress(
     fullMediaHash,
     !shouldLoad,
-    !isPaidPreview ? getMediaFormat(video, 'inline') : undefined,
+    inlineMediaFormat,
   );
   const fullMediaData = localBlobUrl || mediaData;
   const [isPlayerReady, markPlayerReady] = useFlag();
@@ -136,7 +144,12 @@ const Video = <T,>({
 
   const isInline = fullMediaData && wasIntersectedRef.current;
 
-  const isUnsupported = useUnsupportedMedia(videoRef, true, !isInline);
+  const isUnsupported = useUnsupportedMedia(
+    videoRef,
+    true,
+    !isInline,
+    shouldForceBlob ? undefined : markForceBlob,
+  );
 
   const previewMediaHash = !isPaidPreview ? getVideoMediaHash(video, 'preview') : undefined;
   const [isPreviewPreloaded] = useState(Boolean(previewMediaHash && mediaLoader.getFromMemory(previewMediaHash)));
