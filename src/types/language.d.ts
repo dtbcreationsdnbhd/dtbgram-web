@@ -1917,6 +1917,7 @@ export interface LangPair {
   'SendInStandardQuality': undefined;
   'SendInHighQuality': undefined;
   'MonoforumBadge': undefined;
+  'InternalMemberBadge': undefined;
   'MonoforumStatus': undefined;
   'MonoforumComposerPlaceholder': undefined;
   'ChannelSendMessage': undefined;

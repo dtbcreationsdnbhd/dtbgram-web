@@ -1,5 +1,5 @@
 import { memo, useMemo } from '../../lib/teact/teact';
-import { getActions } from '../../global';
+import { getActions, withGlobal } from '../../global';
 
 import type {
   ApiPeer,
@@ -19,9 +19,14 @@ import { isApiPeerUser } from '../../global/helpers/peers';
 import buildClassName from '../../util/buildClassName';
 import buildStyle from '../../util/buildStyle';
 import { copyTextToClipboard } from '../../util/clipboard';
+import {
+  getEmployeeVerifiedRevision,
+  shouldShowEmployeeVerified,
+} from '../../util/employeeVerified';
 import stopEvent from '../../util/stopEvent';
 import renderText from './helpers/renderText';
 
+import useDerivedState from '../../hooks/useDerivedState';
 import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
 import useOldLang from '../../hooks/useOldLang';
@@ -58,6 +63,10 @@ type OwnProps = {
   observeIntersection?: ObserveFn;
 };
 
+type StateProps = {
+  currentUserId?: string;
+};
+
 const FullNameTitle = ({
   className,
   style,
@@ -78,11 +87,13 @@ const FullNameTitle = ({
   withStatusTextColor,
   onEmojiStatusClick,
   observeIntersection,
-}: OwnProps) => {
+  currentUserId,
+}: OwnProps & StateProps) => {
   const { showNotification } = getActions();
 
   const oldLang = useOldLang();
   const lang = useLang();
+  useDerivedState(getEmployeeVerifiedRevision);
 
   const realPeer = 'id' in peer ? peer : undefined;
   const customPeer = 'isCustomPeer' in peer ? peer : undefined;
@@ -128,6 +139,9 @@ const FullNameTitle = ({
   }, [customPeer, isSavedDialog, isSavedMessages, oldLang, realPeer]);
   const botVerificationIconId = !isSavedMessages && !isSavedDialog ? realPeer?.botVerificationIconId : undefined;
   const renderedTitle = useMemo(() => specialTitle || renderText(title || ''), [specialTitle, title]);
+  const isInternalMember = Boolean(
+    !noVerified && realPeer && shouldShowEmployeeVerified(currentUserId, realPeer.id),
+  );
 
   return (
     <div
@@ -185,6 +199,9 @@ const FullNameTitle = ({
             </Transition>
           )}
           {canShowEmojiStatus && !emojiStatus && isPremium && <StarIcon />}
+          {isInternalMember && (
+            <span className={styles.internalBadge}>{lang('InternalMemberBadge')}</span>
+          )}
           {isMonoforum && (
             <div className={buildClassName(styles.monoforumBadge, monoforumBadgeClassName)}>
               {lang('MonoforumBadge')}
@@ -197,4 +214,8 @@ const FullNameTitle = ({
   );
 };
 
-export default memo(FullNameTitle);
+export default memo(withGlobal<OwnProps>((global): Complete<StateProps> => {
+  return {
+    currentUserId: global.currentUserId,
+  };
+})(FullNameTitle));

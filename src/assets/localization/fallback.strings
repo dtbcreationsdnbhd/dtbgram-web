@@ -2571,6 +2571,7 @@
 "SendInStandardQuality" = "Send In Standard Quality";
 "SendInHighQuality" = "Send In High Quality";
 "MonoforumBadge" = "DIRECT";
+"InternalMemberBadge" = "Internal";
 "MonoforumStatus" = "Direct messages";
 "MonoforumComposerPlaceholder" = "Choose a message to reply";
 "ChannelSendMessage" = "Direct Messages";

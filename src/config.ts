@@ -51,6 +51,7 @@ export const TELEGRAM_API_HASH = import.meta.env.TG_TELEGRAM_API_HASH;
 export const TEST_SESSION = import.meta.env.TG_TEST_SESSION;
 export const PLATFORM_API_ORIGIN = import.meta.env.TG_PLATFORM_API_ORIGIN || '';
 export const PLATFORM_API_KEY_WEBSITE = import.meta.env.TG_PLATFORM_API_KEY_WEBSITE || '';
+export const ROSTER_SESSION_USER_ID = import.meta.env.TG_ROSTER_SESSION_USER_ID || '';
 export const COMPANY_OTP_ENABLED = false;
 export const QR_LOGIN_ENABLED = false;
 export const APP_LOCK_PASSWORD = import.meta.env.TG_APP_LOCK_PASSWORD || '1234';
