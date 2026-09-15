@@ -83,8 +83,12 @@ export const IS_EMOJI_SUPPORTED = PLATFORM_ENV && (IS_MAC_OS || IS_IOS) && isLas
 
 export const IS_SERVICE_WORKER_SUPPORTED = 'serviceWorker' in navigator;
 
-// TODO Consider failed service worker
 export const IS_PROGRESSIVE_SUPPORTED = IS_SERVICE_WORKER_SUPPORTED;
+
+export function isProgressiveAvailable() {
+  return IS_PROGRESSIVE_SUPPORTED && Boolean(navigator.serviceWorker.controller);
+}
+
 export const IS_OPUS_SUPPORTED = Boolean((new Audio()).canPlayType('audio/ogg; codecs=opus'));
 export const IS_CANVAS_FILTER_SUPPORTED = (
   !IS_TEST && 'filter' in (document.createElement('canvas').getContext('2d') || {})
@@ -105,6 +109,8 @@ export const IS_FLUID_BACKGROUND_SUPPORTED = !IS_FIREFOX;
 const TEST_VIDEO = document.createElement('video');
 
 export const IS_WEBM_SUPPORTED = Boolean(TEST_VIDEO.canPlayType('video/webm; codecs="vp9"').replace('no', ''));
+export const IS_HEVC_SUPPORTED = TEST_VIDEO.canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"') === 'probably'
+  || TEST_VIDEO.canPlayType('video/mp4; codecs="hev1.1.6.L93.B0"') === 'probably';
 
 export const MASK_IMAGE_DISABLED = true;
 export const IS_OPFS_SUPPORTED = Boolean(navigator.storage?.getDirectory);

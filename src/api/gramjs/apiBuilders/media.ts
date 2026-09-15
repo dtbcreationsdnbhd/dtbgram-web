@@ -80,6 +80,7 @@ export function buildApiVideoFromDocument(document: GramJs.Document, altDocument
     supportsStreaming = false,
     roundMessage: isRound = false,
     nosound,
+    videoCodec,
   } = videoAttr;
 
   const waveform = isRound ? generateWaveform(duration) : undefined;
@@ -104,6 +105,7 @@ export function buildApiVideoFromDocument(document: GramJs.Document, altDocument
     previewPhotoSizes,
     waveform,
     noSound: nosound,
+    videoCodec,
     altVideos,
     storyboardInfo,
   };

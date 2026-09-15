@@ -9,7 +9,10 @@ import useOldLang from '../useOldLang';
 const NOTIFICATION_DURATION = 8000;
 
 export default function useUnsupportedMedia(
-  ref: ElementRef<HTMLVideoElement>, shouldDisableNotification?: boolean, isDisabled?: boolean,
+  ref: ElementRef<HTMLVideoElement>,
+  shouldDisableNotification?: boolean,
+  isDisabled?: boolean,
+  onRecoverableError?: NoneToVoidFunction,
 ) {
   const { showNotification } = getActions();
   const lang = useOldLang();
@@ -31,20 +34,19 @@ export default function useUnsupportedMedia(
     if (!error) return;
 
     // https://developer.mozilla.org/en-US/docs/Web/API/MediaError/code
-    if (error.code === 3 || error.code === 4) {
-      handleUnsupported();
-    }
-  });
+    if (error.code !== 3 && error.code !== 4) return;
 
-  const onCanPlay = useLastCallback((event: Event) => {
-    const target = event.currentTarget as HTMLVideoElement;
-
-    if (!target.videoHeight || !target.videoWidth) {
-      handleUnsupported();
+    if (onRecoverableError) {
+      onRecoverableError();
+      return;
     }
+
+    handleUnsupported();
   });
 
   useEffect(() => {
+    setIsUnsupported(false);
+
     if (isDisabled) return undefined;
 
     const { current } = ref;
@@ -53,13 +55,11 @@ export default function useUnsupportedMedia(
     }
 
     current.addEventListener('error', onError);
-    current.addEventListener('canplay', onCanPlay);
 
     return () => {
       current.removeEventListener('error', onError);
-      current.removeEventListener('canplay', onCanPlay);
     };
-  }, [isDisabled, ref]);
+  }, [isDisabled, onRecoverableError, ref]);
 
   return isUnsupported;
 }

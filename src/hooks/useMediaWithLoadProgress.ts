@@ -5,7 +5,7 @@ import {
 import { ApiMediaFormat } from '../api/types';
 
 import { selectIsSynced } from '../global/selectors';
-import { IS_PROGRESSIVE_SUPPORTED } from '../util/browser/windowEnvironment';
+import { isProgressiveAvailable } from '../util/browser/windowEnvironment';
 import * as mediaLoader from '../util/mediaLoader';
 import useSelector from './data/useSelector';
 import useForceUpdate from './useForceUpdate';
@@ -23,7 +23,7 @@ export default function useMediaWithLoadProgress(
   delay?: number | false,
   isHtmlAllowed = false,
 ) {
-  const isStreaming = IS_PROGRESSIVE_SUPPORTED && mediaFormat === ApiMediaFormat.Progressive;
+  const isStreaming = isProgressiveAvailable() && mediaFormat === ApiMediaFormat.Progressive;
   const mediaData = mediaHash
     ? (isStreaming && !noLoad ? mediaLoader.getProgressiveUrl(mediaHash)
       : mediaLoader.getFromMemory(mediaHash)) : undefined;
