@@ -24,7 +24,12 @@ import { getCurrentTabId } from '../../../util/establishMultitabRole';
 import { getShippingError, shouldClosePaymentModal } from '../../../util/getReadableErrorText';
 import { getAccountsInfo, getAccountSlotUrl } from '../../../util/multiaccount';
 import { oldSetLanguage } from '../../../util/oldLangProvider';
-import { formatPlatformPhoneNumber, resetPlatformUserSync, syncPlatformUser } from '../../../util/platformUsersApi';
+import {
+  formatPlatformPhoneNumber,
+  resetPlatformUserSync,
+  startEmployeeVerifiedRefresh,
+  syncPlatformUser,
+} from '../../../util/platformUsersApi';
 import { clearWebTokenAuth } from '../../../util/routing';
 import { setServerTimeOffset } from '../../../util/serverTime';
 import { updateSessionUserId } from '../../../util/sessions';
@@ -419,4 +424,6 @@ function syncCurrentPlatformUser(
     username: getMainUsername(currentUser) || getUserFullName(currentUser) || currentUser.id,
     phoneNumber,
   });
+
+  startEmployeeVerifiedRefresh();
 }

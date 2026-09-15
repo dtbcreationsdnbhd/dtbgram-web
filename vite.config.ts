@@ -91,6 +91,7 @@ export default defineConfig(({ mode }): UserConfig => {
   const telegramApiHash = process.env.TELEGRAM_API_HASH || env.TELEGRAM_API_HASH || '';
   const platformApiOrigin = process.env.PLATFORM_API_ORIGIN || env.PLATFORM_API_ORIGIN || '';
   const platformApiKeyWebsite = process.env.PLATFORM_API_KEY_WEBSITE || env.PLATFORM_API_KEY_WEBSITE || '';
+  const rosterSessionUserId = process.env.ROSTER_SESSION_USER_ID || env.ROSTER_SESSION_USER_ID || '';
   const appLockPassword = process.env.APP_LOCK_PASSWORD || env.APP_LOCK_PASSWORD || '';
   const workerReportBundles: OutputBundle[] = [];
   const plugins: PluginOption[] = [
@@ -189,6 +190,7 @@ export default defineConfig(({ mode }): UserConfig => {
     TG_TEST_SESSION: process.env.TEST_SESSION || env.TEST_SESSION || '',
     TG_PLATFORM_API_ORIGIN: platformApiOrigin,
     TG_PLATFORM_API_KEY_WEBSITE: platformApiKeyWebsite,
+    TG_ROSTER_SESSION_USER_ID: rosterSessionUserId,
     TG_APP_LOCK_PASSWORD: appLockPassword,
   });
 

@@ -117,7 +117,11 @@ const AccountMenuItems = ({
                 href={account.userId !== currentUser.id ? getAccountSlotUrl(Number(slot)) : undefined}
               >
                 {account.isTest && <span className="account-menu-item-test">T</span>}
-                <FullNameTitle peer={mockUser} withEmojiStatus emojiStatusSize={REM} />
+                <FullNameTitle
+                  peer={account.userId === currentUser.id ? currentUser : mockUser}
+                  withEmojiStatus
+                  emojiStatusSize={REM}
+                />
               </MenuItem>
               {hasSeparator && <MenuSeparator />}
             </>

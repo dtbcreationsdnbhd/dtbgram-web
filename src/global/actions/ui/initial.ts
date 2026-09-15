@@ -17,6 +17,7 @@ import { subscribe, unsubscribe } from '../../../util/notifications';
 import { oldSetLanguage } from '../../../util/oldLangProvider';
 import { decryptSessionByCurrentHash } from '../../../util/passcode';
 import { applyPerformanceSettings } from '../../../util/perfomanceSettings';
+import { startEmployeeVerifiedRefresh } from '../../../util/platformUsersApi';
 import { hasStoredSession, storeSession } from '../../../util/sessions';
 import switchTheme from '../../../util/switchTheme';
 import { getSystemTheme, setSystemThemeChangeCallback } from '../../../util/systemTheme';
@@ -114,6 +115,7 @@ addActionHandler('initShared', (): ActionReturnType => {
 
 addActionHandler('initMain', (global, actions): ActionReturnType => {
   actions.cleanupExpiredTtlMessages();
+  startEmployeeVerifiedRefresh();
 
   const { hasWebNotifications, hasPushNotifications } = selectSettingsKeys(global);
   if (hasWebNotifications && hasPushNotifications) {

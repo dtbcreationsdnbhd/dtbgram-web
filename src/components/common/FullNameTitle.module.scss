@@ -30,6 +30,19 @@
   align-items: center;
 }
 
+.internalBadge {
+  flex-shrink: 0;
+
+  font-size: 0.6875rem;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  color: #fe5f03;
+
+  :global(.selected) & {
+    color: var(--color-white);
+  }
+}
+
 .monoforumBadge {
   padding: 0.125rem 0.25rem;
   border-radius: 0.25rem;
