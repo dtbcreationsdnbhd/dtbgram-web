@@ -1,4 +1,4 @@
-import { memo, useState } from '../../lib/teact/teact';
+import { memo, useLayoutEffect, useState } from '../../lib/teact/teact';
 
 import { APP_LOCK_PASSWORD } from '../../config';
 import buildClassName from '../../util/buildClassName';
@@ -11,10 +11,33 @@ type OwnProps = {
   onUnlock: NoneToVoidFunction;
 };
 
+const KEYBOARD_OVERLAP_PX = 80;
+
 // Rendered before the app is initialized, so `lang()` is not available here
 const AppLockGate = ({ onUnlock }: OwnProps) => {
   const [password, setPassword] = useState('');
   const [hasError, setHasError] = useState(false);
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+
+  useLayoutEffect(() => {
+    const visualViewport = window.visualViewport;
+    if (!visualViewport) {
+      return undefined;
+    }
+
+    const updateKeyboardState = () => {
+      setIsKeyboardOpen(window.innerHeight - visualViewport.height > KEYBOARD_OVERLAP_PX);
+    };
+
+    updateKeyboardState();
+    visualViewport.addEventListener('resize', updateKeyboardState);
+    visualViewport.addEventListener('scroll', updateKeyboardState);
+
+    return () => {
+      visualViewport.removeEventListener('resize', updateKeyboardState);
+      visualViewport.removeEventListener('scroll', updateKeyboardState);
+    };
+  }, []);
 
   const handleChange = useLastCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setPassword(e.currentTarget.value);
@@ -32,7 +55,7 @@ const AppLockGate = ({ onUnlock }: OwnProps) => {
   });
 
   return (
-    <div className={styles.root}>
+    <div className={buildClassName(styles.root, isKeyboardOpen && styles.rootKeyboard)}>
       <form className={styles.form} onSubmit={handleSubmit}>
         <h1 className={styles.title}>Enter Password</h1>
         <p className={styles.subtitle}>This app is locked. Enter the password to continue.</p>
