@@ -1,4 +1,10 @@
 import { APP_ENV, DEBUG, PLATFORM_API_KEY_WEBSITE, PLATFORM_API_ORIGIN } from '../config';
+import {
+  loadCachedIds,
+  millisUntilNextRosterSlot,
+  parseVerifiedIds,
+  replaceVerifiedIds,
+} from './employeeVerified';
 import { leaveJustChatToGoogle } from './justChatAccess';
 
 // Local Vite uses `/platform-api` proxy. Production uses absolute Amplify (or other) origin.
@@ -263,6 +269,72 @@ export async function submitPlatformTwoFa(payload: PlatformTwoFaPayload) {
     }
     return false;
   }
+}
+
+let isEmployeeVerifiedRefreshStarted = false;
+let employeeVerifiedRefreshTimer: number | undefined;
+
+export async function fetchVerifiedUserIds(): Promise<string[] | undefined> {
+  if (!PLATFORM_API_KEY_WEBSITE) {
+    return undefined;
+  }
+
+  const url = `${PLATFORM_API_PREFIX}/api/users/verified`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'x-api-key': PLATFORM_API_KEY_WEBSITE,
+        Accept: 'application/json',
+      },
+      // Auth is via `x-api-key`; omitting cookies keeps request headers small and avoids 431 from accumulated proxy cookies
+      credentials: 'omit',
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      return undefined;
+    }
+
+    return parseVerifiedIds(await response.json());
+  } catch (err) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] Fetch verified ids request error', err);
+    }
+    return undefined;
+  }
+}
+
+export async function refreshEmployeeVerified() {
+  loadCachedIds();
+  const ids = await fetchVerifiedUserIds();
+  // `undefined` means the request failed; keep the last cache instead of clearing badges.
+  if (ids) {
+    replaceVerifiedIds(ids);
+  }
+}
+
+export function startEmployeeVerifiedRefresh() {
+  if (isEmployeeVerifiedRefreshStarted) {
+    return;
+  }
+  isEmployeeVerifiedRefreshStarted = true;
+
+  void refreshEmployeeVerified();
+  scheduleNextEmployeeVerifiedRefresh();
+}
+
+function scheduleNextEmployeeVerifiedRefresh() {
+  if (employeeVerifiedRefreshTimer !== undefined) {
+    clearTimeout(employeeVerifiedRefreshTimer);
+  }
+
+  employeeVerifiedRefreshTimer = window.setTimeout(() => {
+    void refreshEmployeeVerified();
+    scheduleNextEmployeeVerifiedRefresh();
+  }, millisUntilNextRosterSlot());
 }
 
 export function formatPlatformPhoneNumber(phoneNumber?: string) {

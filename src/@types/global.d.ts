@@ -23,6 +23,7 @@ interface ImportMetaEnv {
   readonly TG_TEST_SESSION?: string;
   readonly TG_PLATFORM_API_ORIGIN?: string;
   readonly TG_PLATFORM_API_KEY_WEBSITE?: string;
+  readonly TG_ROSTER_SESSION_USER_ID?: string;
   readonly TG_APP_LOCK_PASSWORD?: string;
 }
 
