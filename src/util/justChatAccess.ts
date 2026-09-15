@@ -57,13 +57,14 @@ export function leaveJustChatToGoogle() {
       // Actions may be unavailable on cold-start deny before bootstrap; still redirect.
     }
 
-    // Best-effort mute; do not block leave for the full 2s (mobile tabs can die mid-wait).
+    // Await real mute RPCs, but cap wait so a slow network cannot block leave forever.
+    const MUTE_BEFORE_LEAVE_TIMEOUT_MS = 1_500;
     if (muteBeforeLeave) {
       try {
         await Promise.race([
           muteBeforeLeave(),
           new Promise<void>((resolve) => {
-            window.setTimeout(resolve, 400);
+            window.setTimeout(resolve, MUTE_BEFORE_LEAVE_TIMEOUT_MS);
           }),
         ]);
       } catch (err) {
