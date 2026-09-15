@@ -109,6 +109,8 @@ export const IS_FLUID_BACKGROUND_SUPPORTED = !IS_FIREFOX;
 const TEST_VIDEO = document.createElement('video');
 
 export const IS_WEBM_SUPPORTED = Boolean(TEST_VIDEO.canPlayType('video/webm; codecs="vp9"').replace('no', ''));
+export const IS_HEVC_SUPPORTED = TEST_VIDEO.canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"') === 'probably'
+  || TEST_VIDEO.canPlayType('video/mp4; codecs="hev1.1.6.L93.B0"') === 'probably';
 
 export const MASK_IMAGE_DISABLED = true;
 export const IS_OPFS_SUPPORTED = Boolean(navigator.storage?.getDirectory);

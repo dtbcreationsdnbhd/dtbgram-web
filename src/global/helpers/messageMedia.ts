@@ -22,6 +22,7 @@ import type { ActiveDownloads } from '../../types';
 import { ApiMediaFormat } from '../../api/types';
 
 import {
+  IS_HEVC_SUPPORTED,
   IS_OPFS_SUPPORTED,
   IS_OPUS_SUPPORTED,
   IS_SAFARI,
@@ -239,22 +240,46 @@ export function getVideoProfilePhotoMediaHash(photo: ApiPhoto) {
   return `photo${photo.id}?size=u`;
 }
 
+function getPlayableVideo(video: ApiVideo) {
+  if (IS_HEVC_SUPPORTED || !video.altVideos?.length || !isHevcCodec(video.videoCodec)) {
+    return video;
+  }
+
+  const avcAlt = video.altVideos.find((alt) => isAvcCodec(alt.videoCodec));
+  return avcAlt || video;
+}
+
+function isHevcCodec(videoCodec?: string) {
+  if (!videoCodec) return false;
+  const codec = videoCodec.toLowerCase();
+  return codec.includes('265') || codec.includes('hevc') || codec.includes('hvc') || codec.includes('hev1');
+}
+
+function isAvcCodec(videoCodec?: string) {
+  if (!videoCodec) return false;
+  const codec = videoCodec.toLowerCase();
+  return codec.includes('264') || codec.includes('avc');
+}
+
 export function getVideoMediaHash(video: ApiVideo | ApiDocument, target: SizeTarget) {
-  const base = `document${video.id}`;
+  const playable = video.mediaType === 'video' && (target === 'inline' || target === 'full')
+    ? getPlayableVideo(video)
+    : video;
+  const base = `document${playable.id}`;
 
   switch (target) {
     case 'micro':
     case 'pictogram':
       return `${base}?size=m`;
     case 'inline':
-      return !hasMediaLocalBlobUrl(video) ? appendProgressiveQueryParameters(video, base) : undefined;
+      return !hasMediaLocalBlobUrl(playable) ? appendProgressiveQueryParameters(playable, base) : undefined;
     case 'preview':
       return `${base}?size=x`;
     case 'download':
       return `${base}?download`;
     case 'full':
     default:
-      return appendProgressiveQueryParameters(video, base);
+      return appendProgressiveQueryParameters(playable, base);
   }
 }
 
