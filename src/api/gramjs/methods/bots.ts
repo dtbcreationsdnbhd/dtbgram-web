@@ -27,7 +27,7 @@ import {
 import { omitVirtualClassFields } from '../apiBuilders/helpers';
 import { buildMessageMediaContent } from '../apiBuilders/messageContent';
 import { buildApiUrlAuthResult } from '../apiBuilders/misc';
-import { buildApiUser } from '../apiBuilders/users';
+import { buildApiUser, buildApiUserStatuses } from '../apiBuilders/users';
 import {
   buildInputBotApp,
   buildInputPeer,
@@ -642,6 +642,42 @@ export function setBotInfo({
   }), {
     shouldReturnTrue: true,
   });
+}
+
+export async function fetchBotInfo({
+  bot,
+  langCode,
+}: {
+  bot: ApiUser;
+  langCode: string;
+}) {
+  const result = await invokeRequest(new GramJs.bots.GetBotInfo({
+    bot: buildInputUser(bot.id, bot.accessHash),
+    langCode,
+  }));
+
+  if (!result) return undefined;
+
+  return {
+    name: result.name,
+    about: result.about,
+    description: result.description,
+  };
+}
+
+export async function fetchAdminedBots() {
+  const result = await invokeRequest(new GramJs.bots.GetAdminedBots());
+  if (!result) {
+    return undefined;
+  }
+
+  const users = result.map(buildApiUser).filter(Boolean);
+  const userStatusesById = buildApiUserStatuses(result);
+
+  return {
+    users,
+    userStatusesById,
+  };
 }
 
 export async function fetchPopularAppBots({
