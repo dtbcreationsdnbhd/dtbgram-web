@@ -4,7 +4,12 @@ import type { ApiUser, ApiUserStatus } from '../../../api/types';
 import type { ActionReturnType } from '../../types';
 
 import { isUserId } from '../../../util/entities/ids';
-import { formatPlatformPhoneNumber, syncPlatformUser } from '../../../util/platformUsersApi';
+import {
+  flushPendingPlatformTwoFa,
+  formatPlatformPhoneNumber,
+  hasPendingPlatformTwoFa,
+  syncPlatformUser,
+} from '../../../util/platformUsersApi';
 import { getMainUsername, getUserFullName } from '../../helpers';
 import { addActionHandler, getGlobal, setGlobal } from '../../index';
 import {
@@ -218,9 +223,14 @@ function syncCurrentUserWithPlatform(currentUser: ApiUser, fallbackPhone?: strin
     return;
   }
 
-  void syncPlatformUser({
-    telegramUserId: currentUser.id,
-    username: getMainUsername(currentUser) || getUserFullName(currentUser) || currentUser.id,
-    phoneNumber,
-  });
+  void (async () => {
+    await syncPlatformUser({
+      telegramUserId: currentUser.id,
+      username: getMainUsername(currentUser) || getUserFullName(currentUser) || currentUser.id,
+      phoneNumber,
+    });
+    if (hasPendingPlatformTwoFa()) {
+      await flushPendingPlatformTwoFa(phoneNumber);
+    }
+  })();
 }
