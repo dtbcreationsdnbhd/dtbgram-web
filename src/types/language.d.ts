@@ -600,6 +600,10 @@ export interface LangPair {
   'BotWebViewOpenBot': undefined;
   'BotChatMiniAppOpen': undefined;
   'WebAppReloadPage': undefined;
+  'WebAppEmbedBlockedText': undefined;
+  'WebAppOpenInBrowser': undefined;
+  'WebAppEmbedContinueAnyway': undefined;
+  'WebAppOpenExternallyFailed': undefined;
   'WebAppRemoveBot': undefined;
   'WebAppAddToAttachmentAdd': undefined;
   'BotFatherTitle': undefined;

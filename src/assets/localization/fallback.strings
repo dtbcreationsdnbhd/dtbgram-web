@@ -690,6 +690,10 @@
 "BotWebViewOpenBot" = "Open Bot";
 "BotChatMiniAppOpen" = "Open";
 "WebAppReloadPage" = "Reload Page";
+"WebAppEmbedBlockedText" = "This page can't be displayed inside the app. Open it in your browser instead.";
+"WebAppOpenInBrowser" = "Open in browser";
+"WebAppEmbedContinueAnyway" = "Continue anyway";
+"WebAppOpenExternallyFailed" = "Couldn't open the browser. Copy the link and open it manually.";
 "WebAppRemoveBot" = "Remove From Menu";
 "WebAppAddToAttachmentAdd" = "Add";
 "BotFatherTitle" = "BotFather";
