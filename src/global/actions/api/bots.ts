@@ -13,15 +13,18 @@ import {
 import { ManagementProgress } from '../../../types';
 
 import { BOT_FATHER_USERNAME, GENERAL_REFETCH_INTERVAL } from '../../../config';
+import {
+  isTelegramInternalWebAppUrl,
+} from '../../../util/browser/openWebAppTopLevel';
 import { copyTextToClipboard } from '../../../util/clipboard';
 import { getUsernameFromDeepLink } from '../../../util/deepLinkParser';
 import { getCurrentTabId } from '../../../util/establishMultitabRole';
-import { pick } from '../../../util/iteratees.ts';
+import { buildCollectionByKey, pick } from '../../../util/iteratees.ts';
 import { type AdvancedLangFnParameters, getTranslationFn } from '../../../util/localization';
 import { formatStarsAsText } from '../../../util/localization/format';
 import { oldTranslate } from '../../../util/oldLangProvider';
 import requestActionTimeout from '../../../util/requestActionTimeout';
-import { debounce } from '../../../util/schedulers';
+import { debounce, pause } from '../../../util/schedulers';
 import { extractCurrentThemeParams } from '../../../util/themeStyle';
 import { callApi } from '../../../api/gramjs';
 import {
@@ -38,6 +41,8 @@ import {
   addActionHandler, getActions, getGlobal, setGlobal,
 } from '../../index';
 import {
+  addUsers,
+  addUserStatuses,
   removeBlockedUser,
   updateBotAppPermissions,
   updateManagementProgress,
@@ -79,11 +84,67 @@ import { getPeerStarsForMessage, sendEphemeralMessages } from './messages';
 
 import { getIsWebAppsFullscreenSupported } from '../../../hooks/useAppLayout';
 
+const BOT_FATHER_CREATE_STEP_MS = 2000;
+const BOT_FATHER_POLL_ATTEMPTS = 10;
+const BOT_FATHER_HISTORY_LIMIT = 40;
+const BOT_TOKEN_REGEX = /\b(\d{5,}:[A-Za-z0-9_-]{20,})\b/;
+const BOT_FATHER_DELETE_CONFIRM = 'Yes, I am totally sure.';
+
 const runDebouncedForSearch = debounce((cb) => cb(), 500, false);
 let botFatherId: string | null;
+let botFatherFlowLock: Promise<void> | undefined;
+
+type BotFatherCommandDraft = {
+  command: string;
+  description: string;
+};
+
+async function withBotFatherFlowLock<T>(fn: () => Promise<T>): Promise<T> {
+  while (botFatherFlowLock) {
+    try {
+      await botFatherFlowLock;
+    } catch {
+      // Previous flow failed; lock is released in finally
+    }
+  }
+
+  let release!: NoneToVoidFunction;
+  botFatherFlowLock = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  try {
+    return await fn();
+  } finally {
+    release();
+    botFatherFlowLock = undefined;
+  }
+}
 
 function canUseInlineBots<T extends GlobalState>(global: T, chat: ApiChat) {
   return isChatAdmin(chat) || !isUserRightBanned(chat, 'sendInline', selectChatFullInfo(global, chat.id));
+}
+
+function tryOpenWebAppTopLevel(
+  actions: {
+    openBotFatherModal: AnyToVoidFunction;
+  },
+  url: string,
+  tabId: number,
+): boolean {
+  if (!isTelegramInternalWebAppUrl(url)) return false;
+
+  let view: 'home' | 'create' = 'home';
+  try {
+    if (new URL(url).pathname.toLowerCase().includes('/create')) {
+      view = 'create';
+    }
+  } catch {
+    // Keep home view
+  }
+
+  actions.openBotFatherModal({ view, tabId });
+  return true;
 }
 
 addActionHandler('clickSuggestedMessageButton', (global, actions, payload): ActionReturnType => {
@@ -671,6 +732,8 @@ addActionHandler('requestSimpleWebView', async (global, actions, payload): Promi
 
   const { url: webViewUrl, isSameOrigin } = result;
 
+  if (tryOpenWebAppTopLevel(actions, webViewUrl, tabId)) return;
+
   global = getGlobal();
   const newActiveApp: WebApp = {
     requestUrl: url,
@@ -741,6 +804,8 @@ addActionHandler('requestWebView', async (global, actions, payload): Promise<voi
     url: webViewUrl, queryId, isFullScreen, isSameOrigin,
   } = result;
 
+  if (tryOpenWebAppTopLevel(actions, webViewUrl, tabId)) return;
+
   global = getGlobal();
   const newActiveApp: WebApp = {
     requestUrl: url,
@@ -786,6 +851,8 @@ addActionHandler('openChatInviteWebView', (global, actions, payload): ActionRetu
     setGlobal(global);
     return;
   }
+
+  if (tryOpenWebAppTopLevel(actions, url, tabId)) return;
 
   const newActiveApp: WebApp = {
     url,
@@ -905,6 +972,8 @@ addActionHandler('requestMainWebView', async (global, actions, payload): Promise
   const {
     url: webViewUrl, queryId, isFullscreen, isSameOrigin,
   } = result;
+
+  if (tryOpenWebAppTopLevel(actions, webViewUrl, tabId)) return;
 
   global = getGlobal();
   const newActiveApp: WebApp = {
@@ -1061,6 +1130,8 @@ addActionHandler('requestAppWebView', async (global, actions, payload): Promise<
   if (!result) return;
 
   const { url, isFullscreen, isSameOrigin } = result;
+
+  if (tryOpenWebAppTopLevel(actions, url, tabId)) return;
 
   global = getGlobal();
 
@@ -1692,11 +1763,927 @@ addActionHandler('toggleUserLocationPermission', (global, actions, payload): Act
   setGlobal(global);
 });
 
+addActionHandler('openBotFatherModal', (global, actions, payload): ActionReturnType => {
+  const {
+    view = 'home',
+    selectedBotId,
+    tabId = getCurrentTabId(),
+  } = payload || {};
+
+  const previousModal = selectTabState(global, tabId).botFatherModal;
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      view,
+      selectedBotId,
+      isCreating: undefined,
+      createError: undefined,
+      // Keep prior list visible while refreshing to avoid empty flash / perceived lag
+      adminedBotIds: previousModal?.adminedBotIds,
+      botFatherId: botFatherId || previousModal?.botFatherId,
+      isLoading: !previousModal?.adminedBotIds?.length,
+    },
+  }, tabId);
+  setGlobal(global);
+
+  void refreshBotFatherModalPeer(tabId);
+
+  actions.loadAdminedBots({ tabId });
+});
+
+async function refreshBotFatherModalPeer(tabId: number) {
+  const id = await ensureBotFatherChatId();
+  let global = getGlobal();
+  const modal = selectTabState(global, tabId).botFatherModal;
+  if (!modal || !id) return;
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...modal,
+      botFatherId: id,
+    },
+  }, tabId);
+  setGlobal(global);
+}
+
+addActionHandler('closeBotFatherModal', (global, actions, payload): ActionReturnType => {
+  const { tabId = getCurrentTabId() } = payload || {};
+
+  return updateTabState(global, {
+    botFatherModal: undefined,
+  }, tabId);
+});
+
+addActionHandler('setBotFatherModalView', (global, actions, payload): ActionReturnType => {
+  const {
+    view, selectedBotId, editingCommandIndex, tabId = getCurrentTabId(),
+  } = payload;
+  const modal = selectTabState(global, tabId).botFatherModal;
+  if (!modal) return;
+
+  return updateTabState(global, {
+    botFatherModal: {
+      ...modal,
+      view,
+      selectedBotId: selectedBotId !== undefined ? selectedBotId : modal.selectedBotId,
+      editingCommandIndex,
+      createError: undefined,
+    },
+  }, tabId);
+});
+
+addActionHandler('loadAdminedBots', async (global, actions, payload): Promise<void> => {
+  const { tabId = getCurrentTabId() } = payload || {};
+  const modal = selectTabState(global, tabId).botFatherModal;
+  if (!modal) return;
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...modal,
+      isLoading: true,
+      hasLoadError: undefined,
+    },
+  }, tabId);
+  setGlobal(global);
+
+  const result = await callApi('fetchAdminedBots');
+
+  global = getGlobal();
+  const currentModal = selectTabState(global, tabId).botFatherModal;
+  if (!currentModal) return;
+
+  if (!result) {
+    global = updateTabState(global, {
+      botFatherModal: {
+        ...currentModal,
+        isLoading: undefined,
+        hasLoadError: true,
+        adminedBotIds: currentModal.adminedBotIds || [],
+      },
+    }, tabId);
+    setGlobal(global);
+    return;
+  }
+
+  global = addUsers(global, buildCollectionByKey(result.users, 'id'));
+  global = addUserStatuses(global, result.userStatusesById);
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...selectTabState(global, tabId).botFatherModal!,
+      isLoading: undefined,
+      hasLoadError: undefined,
+      adminedBotIds: result.users.map((user) => user.id),
+    },
+  }, tabId);
+  setGlobal(global);
+});
+
+addActionHandler('openBotFatherManagedBot', (global, actions, payload): ActionReturnType => {
+  const { botId, tabId = getCurrentTabId() } = payload;
+  const modal = selectTabState(global, tabId).botFatherModal;
+  if (!modal) return;
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...modal,
+      view: 'manage',
+      selectedBotId: botId,
+      botToken: undefined,
+      isLoadingToken: true,
+    },
+  }, tabId);
+  setGlobal(global);
+
+  actions.loadBotFatherBotToken({ tabId });
+});
+
+addActionHandler('loadBotFatherBotToken', async (global, actions, payload): Promise<void> => {
+  const { tabId = getCurrentTabId() } = payload || {};
+  const modal = selectTabState(global, tabId).botFatherModal;
+  if (!modal?.selectedBotId) return;
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...modal,
+      isLoadingToken: true,
+    },
+  }, tabId);
+  setGlobal(global);
+
+  const token = await fetchBotTokenViaBotFather(modal.selectedBotId);
+
+  global = getGlobal();
+  const currentModal = selectTabState(global, tabId).botFatherModal;
+  if (!currentModal) return;
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...currentModal,
+      isLoadingToken: undefined,
+      botToken: token,
+    },
+  }, tabId);
+  setGlobal(global);
+});
+
+addActionHandler('revokeBotFatherBotToken', async (global, actions, payload): Promise<void> => {
+  const { tabId = getCurrentTabId() } = payload || {};
+  const modal = selectTabState(global, tabId).botFatherModal;
+  if (!modal?.selectedBotId) return;
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...modal,
+      isRevokingToken: true,
+    },
+  }, tabId);
+  setGlobal(global);
+
+  const token = await revokeBotTokenViaBotFather(modal.selectedBotId);
+
+  global = getGlobal();
+  const currentModal = selectTabState(global, tabId).botFatherModal;
+  if (!currentModal) return;
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...currentModal,
+      isRevokingToken: undefined,
+      botToken: token || currentModal.botToken,
+    },
+  }, tabId);
+  setGlobal(global);
+
+  if (token) {
+    actions.showNotification({
+      message: { key: 'BotFatherTokenRevoked' },
+      tabId,
+    });
+  }
+});
+
+addActionHandler('loadBotFatherEditInfo', async (global, actions, payload): Promise<void> => {
+  const { tabId = getCurrentTabId() } = payload || {};
+  const modal = selectTabState(global, tabId).botFatherModal;
+  const bot = modal?.selectedBotId ? selectUser(global, modal.selectedBotId) : undefined;
+  if (!modal || !bot) return;
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...modal,
+      isSaving: true,
+      view: 'editInfo',
+    },
+  }, tabId);
+  setGlobal(global);
+
+  global = getGlobal();
+  const langCode = selectSharedSettings(global).language;
+  const info = await callApi('fetchBotInfo', { bot, langCode });
+  global = getGlobal();
+  const fullInfo = selectUserFullInfo(global, bot.id);
+
+  global = getGlobal();
+  const currentModal = selectTabState(global, tabId).botFatherModal;
+  if (!currentModal) return;
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...currentModal,
+      isSaving: undefined,
+      editName: info?.name || bot.firstName || '',
+      editAbout: info?.about || fullInfo?.bio || '',
+      editDescription: info?.description || '',
+    },
+  }, tabId);
+  setGlobal(global);
+});
+
+addActionHandler('saveBotFatherEditInfo', async (global, actions, payload): Promise<void> => {
+  const {
+    name, about, description, photo, tabId = getCurrentTabId(),
+  } = payload;
+  const modal = selectTabState(global, tabId).botFatherModal;
+  const bot = modal?.selectedBotId ? selectUser(global, modal.selectedBotId) : undefined;
+  if (!modal || !bot) return;
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...modal,
+      isSaving: true,
+    },
+  }, tabId);
+  setGlobal(global);
+
+  global = getGlobal();
+  const langCode = selectSharedSettings(global).language;
+  await callApi('setBotInfo', {
+    bot,
+    langCode,
+    name: name.trim() || undefined,
+    about: about?.trim() || undefined,
+    description: description?.trim() || undefined,
+  });
+
+  global = getGlobal();
+  if (about?.trim()) {
+    global = updateUserFullInfo(global, bot.id, { bio: about.trim() });
+  }
+  if (name.trim()) {
+    global = updateUser(global, bot.id, { firstName: name.trim() });
+  }
+
+  if (photo) {
+    actions.uploadProfilePhoto({
+      file: photo,
+      bot,
+      tabId,
+    });
+  }
+
+  const currentModal = selectTabState(global, tabId).botFatherModal;
+  if (!currentModal) {
+    setGlobal(global);
+    return;
+  }
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...currentModal,
+      isSaving: undefined,
+      view: 'manage',
+    },
+  }, tabId);
+  setGlobal(global);
+
+  actions.showNotification({
+    message: { key: 'BotFatherInfoUpdated' },
+    tabId,
+  });
+});
+
+addActionHandler('createBotViaBotFather', async (global, actions, payload): Promise<void> => {
+  const {
+    name, username, about, photo, tabId = getCurrentTabId(),
+  } = payload;
+
+  const modal = selectTabState(global, tabId).botFatherModal;
+  if (!modal) return;
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...modal,
+      isCreating: true,
+      createError: undefined,
+    },
+  }, tabId);
+  setGlobal(global);
+
+  const result = await createBotWithBotFatherChat({
+    name,
+    username,
+    about,
+    photo,
+    tabId,
+    actions,
+  });
+
+  global = getGlobal();
+  const currentModal = selectTabState(global, tabId).botFatherModal;
+  if (!currentModal) return;
+
+  if (!result || 'error' in result) {
+    global = updateTabState(global, {
+      botFatherModal: {
+        ...currentModal,
+        isCreating: undefined,
+        createError: result?.error || 'BotFatherCreateError',
+      },
+    }, tabId);
+    setGlobal(global);
+    return;
+  }
+
+  const adminedBotIds = [...(currentModal.adminedBotIds || [])];
+  if (!adminedBotIds.includes(result.botId)) {
+    adminedBotIds.unshift(result.botId);
+  }
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...currentModal,
+      isCreating: undefined,
+      view: 'manage',
+      selectedBotId: result.botId,
+      adminedBotIds,
+      botToken: undefined,
+      isLoadingToken: true,
+    },
+  }, tabId);
+  setGlobal(global);
+
+  actions.showNotification({
+    message: { key: 'BotFatherCreateSuccess' },
+    tabId,
+  });
+  actions.loadBotFatherBotToken({ tabId });
+});
+
+async function ensureBotFatherChatId() {
+  if (botFatherId) return botFatherId;
+
+  const global = getGlobal();
+  const chat = await fetchChatByUsername(global, BOT_FATHER_USERNAME);
+  if (!chat) return undefined;
+
+  botFatherId = chat.id;
+  return botFatherId;
+}
+
+async function sendBotFatherText(chatId: string, text: string) {
+  const global = getGlobal();
+  const chat = selectChat(global, chatId);
+  if (!chat) return;
+
+  const lastMessageId = selectChatLastMessageId(global, chatId);
+  await callApi('sendMessage', {
+    chat,
+    text,
+    lastMessageId,
+  });
+}
+
+function isBotFatherCreateFailure(text?: string) {
+  if (!text) return false;
+  return /sorry|already taken|occupied|invalid username|can'?t|cannot|not available/i.test(text);
+}
+
+function isBotFatherUsernameTakenFailure(text?: string) {
+  if (!text) return false;
+  return /already taken|occupied|not available|username is already/i.test(text);
+}
+
+async function pollForCreatedBot(chatId: string, username: string, sinceId?: number) {
+  const normalizedUsername = username.toLowerCase().replace(/^@/, '');
+
+  for (let attempt = 0; attempt < BOT_FATHER_POLL_ATTEMPTS; attempt++) {
+    await pause(BOT_FATHER_CREATE_STEP_MS);
+
+    let global = getGlobal();
+    const chat = selectChat(global, chatId);
+    if (!chat) return { error: 'BotFatherCreateError' as const };
+
+    const history = await callApi('fetchMessages', {
+      chat,
+      threadId: MAIN_THREAD_ID,
+      limit: 30,
+    });
+
+    global = getGlobal();
+    const messages = history?.messages || [];
+    if (history?.users?.length) {
+      global = addUsers(global, buildCollectionByKey(history.users, 'id'));
+      setGlobal(global);
+      global = getGlobal();
+    }
+
+    const recent = messages.filter((message) => !sinceId || message.id > sinceId);
+    const failedText = recent
+      .map((message) => message.content.text?.text)
+      .find((text) => isBotFatherCreateFailure(text));
+    if (failedText) {
+      return {
+        error: isBotFatherUsernameTakenFailure(failedText)
+          ? 'BotFatherUsernameTaken' as const
+          : 'BotFatherCreateError' as const,
+      };
+    }
+
+    const createdChat = await fetchChatByUsername(global, normalizedUsername);
+    if (createdChat) {
+      return { botId: createdChat.id };
+    }
+
+    const mentionHit = recent.some((message) => {
+      const text = message.content.text?.text?.toLowerCase() || '';
+      return text.includes(`@${normalizedUsername}`) || text.includes(`t.me/${normalizedUsername}`);
+    });
+    if (mentionHit) {
+      global = getGlobal();
+      const resolved = await fetchChatByUsername(global, normalizedUsername);
+      if (resolved) return { botId: resolved.id };
+    }
+  }
+
+  return { error: 'BotFatherCreateError' as const };
+}
+
+async function createBotWithBotFatherChat({
+  name,
+  username,
+  about,
+  photo,
+  tabId,
+  actions,
+}: {
+  name: string;
+  username: string;
+  about?: string;
+  photo?: File;
+  tabId: number;
+  actions: {
+    uploadProfilePhoto: AnyToVoidFunction;
+  };
+}) {
+  return withBotFatherFlowLock(async () => {
+    const chatId = await ensureBotFatherChatId();
+    if (!chatId) return { error: 'BotFatherCreateError' as const };
+
+    let global = getGlobal();
+    const sinceId = selectChatLastMessageId(global, chatId);
+
+    await sendBotFatherText(chatId, '/cancel');
+    await pause(BOT_FATHER_CREATE_STEP_MS);
+    await sendBotFatherText(chatId, '/newbot');
+    await pause(BOT_FATHER_CREATE_STEP_MS);
+    await sendBotFatherText(chatId, name);
+    await pause(BOT_FATHER_CREATE_STEP_MS);
+    await sendBotFatherText(chatId, username);
+
+    const created = await pollForCreatedBot(chatId, username, sinceId);
+    if (!created || 'error' in created) {
+      return created;
+    }
+
+    global = getGlobal();
+    const bot = selectUser(global, created.botId);
+    if (!bot) {
+      return { error: 'BotFatherCreateError' as const };
+    }
+
+    const trimmedAbout = about?.trim();
+    if (trimmedAbout) {
+      await callApi('setBotInfo', {
+        bot,
+        langCode: selectSharedSettings(global).language,
+        about: trimmedAbout,
+      });
+      global = getGlobal();
+      global = updateUserFullInfo(global, bot.id, { bio: trimmedAbout });
+      setGlobal(global);
+    }
+
+    if (photo) {
+      actions.uploadProfilePhoto({
+        file: photo,
+        bot,
+        tabId,
+      });
+    }
+
+    return created;
+  });
+}
+
+async function findBotTokenInHistory(chatId: string, username: string, sinceId?: number) {
+  const global = getGlobal();
+  const chat = selectChat(global, chatId);
+  if (!chat) return undefined;
+
+  const history = await callApi('fetchMessages', {
+    chat,
+    threadId: MAIN_THREAD_ID,
+    limit: BOT_FATHER_HISTORY_LIMIT,
+  });
+
+  const normalizedUsername = username.toLowerCase();
+  let fallbackToken: string | undefined;
+
+  for (const message of history?.messages || []) {
+    if (sinceId && message.id <= sinceId) continue;
+
+    const text = message.content.text?.text;
+    const token = text?.match(BOT_TOKEN_REGEX)?.[1];
+    if (!text || !token) continue;
+
+    // BotFather repeats the bot username next to its token
+    if (text.toLowerCase().includes(normalizedUsername)) return token;
+    if (!fallbackToken) fallbackToken = token;
+  }
+
+  return fallbackToken;
+}
+
+async function pollForBotToken(chatId: string, username: string, sinceId?: number) {
+  for (let attempt = 0; attempt < BOT_FATHER_POLL_ATTEMPTS; attempt++) {
+    await pause(BOT_FATHER_CREATE_STEP_MS);
+
+    const token = await findBotTokenInHistory(chatId, username, sinceId);
+    if (token) return token;
+  }
+
+  return undefined;
+}
+
+async function requestBotTokenViaCommand(chatId: string, username: string, command: string) {
+  const global = getGlobal();
+  const sinceId = selectChatLastMessageId(global, chatId);
+
+  await sendBotFatherText(chatId, '/cancel');
+  await pause(BOT_FATHER_CREATE_STEP_MS);
+  await sendBotFatherText(chatId, command);
+  await pause(BOT_FATHER_CREATE_STEP_MS);
+  await sendBotFatherText(chatId, `@${username}`);
+
+  return pollForBotToken(chatId, username, sinceId);
+}
+
+async function fetchBotTokenViaBotFather(botId: string) {
+  const chatId = await ensureBotFatherChatId();
+  const global = getGlobal();
+  const bot = selectUser(global, botId);
+  const botFather = chatId ? selectUser(global, chatId) : undefined;
+  const username = bot && getMainUsername(bot);
+  if (!chatId || !botFather || !username) return undefined;
+
+  const existingToken = await findBotTokenInHistory(chatId, username);
+  if (existingToken) return existingToken;
+
+  const sinceId = selectChatLastMessageId(global, chatId);
+
+  await callApi('startBot', {
+    bot: botFather,
+    startParam: `${username}-token`,
+  });
+
+  const token = await pollForBotToken(chatId, username, sinceId);
+  if (token) return token;
+
+  return requestBotTokenViaCommand(chatId, username, '/token');
+}
+
+async function revokeBotTokenViaBotFather(botId: string) {
+  const chatId = await ensureBotFatherChatId();
+  const global = getGlobal();
+  const bot = selectUser(global, botId);
+  const username = bot && getMainUsername(bot);
+  if (!chatId || !username) return undefined;
+
+  return requestBotTokenViaCommand(chatId, username, '/revoke');
+}
+
+async function getRecentBotFatherTexts(chatId: string, sinceId?: number) {
+  const global = getGlobal();
+  const chat = selectChat(global, chatId);
+  if (!chat) return [];
+
+  const history = await callApi('fetchMessages', {
+    chat,
+    threadId: MAIN_THREAD_ID,
+    limit: BOT_FATHER_HISTORY_LIMIT,
+  });
+
+  return (history?.messages || [])
+    .filter((message) => !sinceId || message.id > sinceId)
+    .map((message) => message.content.text?.text || '')
+    .filter(Boolean);
+}
+
+async function pollBotFatherTexts(
+  chatId: string,
+  sinceId: number | undefined,
+  matcher: (texts: string[]) => boolean,
+) {
+  for (let attempt = 0; attempt < BOT_FATHER_POLL_ATTEMPTS; attempt++) {
+    await pause(BOT_FATHER_CREATE_STEP_MS);
+    const texts = await getRecentBotFatherTexts(chatId, sinceId);
+    if (matcher(texts)) return texts;
+  }
+
+  return getRecentBotFatherTexts(chatId, sinceId);
+}
+
+function formatBotFatherCommandsPayload(commands: BotFatherCommandDraft[]) {
+  const lines = commands
+    .map(({ command, description }) => ({
+      command: command.trim().replace(/^\//, '').toLowerCase(),
+      description: description.trim(),
+    }))
+    .filter(({ command, description }) => command && description);
+
+  if (!lines.length) return '/empty';
+
+  return lines.map(({ command, description }) => `${command} - ${description}`).join('\n');
+}
+
+function isBotFatherCommandsSuccess(texts: string[]) {
+  const joined = texts.join('\n').toLowerCase();
+  return /success|updated|saved|set the list|commands for/i.test(joined)
+    && !/sorry|invalid|failed|error|can't|cannot/i.test(joined);
+}
+
+function isBotFatherCommandsFailure(texts: string[]) {
+  const joined = texts.join('\n').toLowerCase();
+  return /sorry|invalid command|failed|error|can't|cannot|wrong format/i.test(joined);
+}
+
+function isBotFatherDeleteSuccess(texts: string[]) {
+  const joined = texts.join('\n').toLowerCase();
+  return /deleted|has been deleted|done!.*delete|bot .* removed/i.test(joined);
+}
+
+function isBotFatherDeleteFailure(texts: string[]) {
+  const joined = texts.join('\n').toLowerCase();
+  return /sorry|can't delete|cannot delete|failed|not found/i.test(joined);
+}
+
+function isBotFatherManagePrimed(texts: string[]) {
+  return texts.some((text) => text.trim().length > 0);
+}
+
+async function selectBotInBotFather(chatId: string, username: string, command: string) {
+  const global = getGlobal();
+  const sinceId = selectChatLastMessageId(global, chatId);
+
+  await sendBotFatherText(chatId, '/cancel');
+  await pause(BOT_FATHER_CREATE_STEP_MS);
+  await sendBotFatherText(chatId, command);
+  await pause(BOT_FATHER_CREATE_STEP_MS);
+  await sendBotFatherText(chatId, `@${username}`);
+
+  return sinceId;
+}
+
+async function saveCommandsViaBotFather(botId: string, commands: BotFatherCommandDraft[]) {
+  return withBotFatherFlowLock(async () => {
+    const chatId = await ensureBotFatherChatId();
+    const global = getGlobal();
+    const bot = selectUser(global, botId);
+    const username = bot && getMainUsername(bot);
+    if (!chatId || !username) return { error: 'BotFatherAutomationError' as const };
+
+    const sinceId = await selectBotInBotFather(chatId, username, '/setcommands');
+    await pause(BOT_FATHER_CREATE_STEP_MS);
+    await sendBotFatherText(chatId, formatBotFatherCommandsPayload(commands));
+
+    const texts = await pollBotFatherTexts(chatId, sinceId, (recent) => (
+      isBotFatherCommandsSuccess(recent) || isBotFatherCommandsFailure(recent)
+    ));
+
+    if (isBotFatherCommandsFailure(texts)) {
+      return { error: 'BotFatherCommandsError' as const };
+    }
+    if (isBotFatherCommandsSuccess(texts)) {
+      return { ok: true as const };
+    }
+
+    // BotFather sometimes confirms without strong keywords; treat non-empty reply as success
+    if (texts.some((text) => text.length > 0 && !isBotFatherCommandsFailure([text]))) {
+      return { ok: true as const };
+    }
+
+    return { error: 'BotFatherCommandsError' as const };
+  });
+}
+
+async function deleteBotWithBotFather(botId: string) {
+  return withBotFatherFlowLock(async () => {
+    const chatId = await ensureBotFatherChatId();
+    const global = getGlobal();
+    const bot = selectUser(global, botId);
+    const username = bot && getMainUsername(bot);
+    if (!chatId || !username) return { error: 'BotFatherAutomationError' as const };
+
+    const sinceId = await selectBotInBotFather(chatId, username, '/deletebot');
+    await pause(BOT_FATHER_CREATE_STEP_MS);
+    await sendBotFatherText(chatId, BOT_FATHER_DELETE_CONFIRM);
+
+    const texts = await pollBotFatherTexts(chatId, sinceId, (recent) => (
+      isBotFatherDeleteSuccess(recent) || isBotFatherDeleteFailure(recent)
+    ));
+
+    if (isBotFatherDeleteFailure(texts)) {
+      return { error: 'BotFatherDeleteError' as const };
+    }
+    if (isBotFatherDeleteSuccess(texts)) {
+      return { ok: true as const };
+    }
+
+    // Fallback confirmation variants used by older BotFather builds
+    await sendBotFatherText(chatId, 'Yes');
+    const retryTexts = await pollBotFatherTexts(chatId, sinceId, (recent) => (
+      isBotFatherDeleteSuccess(recent) || isBotFatherDeleteFailure(recent)
+    ));
+    if (isBotFatherDeleteSuccess(retryTexts)) {
+      return { ok: true as const };
+    }
+
+    return { error: 'BotFatherDeleteError' as const };
+  });
+}
+
+async function primeBotFatherManageCommand(botId: string, command: string) {
+  return withBotFatherFlowLock(async () => {
+    const chatId = await ensureBotFatherChatId();
+    const global = getGlobal();
+    const bot = selectUser(global, botId);
+    const username = bot && getMainUsername(bot);
+    if (!chatId || !username) return { error: 'BotFatherAutomationError' as const };
+
+    const sinceId = await selectBotInBotFather(chatId, username, command);
+    const texts = await pollBotFatherTexts(chatId, sinceId, isBotFatherManagePrimed);
+    if (!texts.length) {
+      return { error: 'BotFatherAutomationError' as const };
+    }
+
+    return { ok: true as const };
+  });
+}
+
+addActionHandler('saveBotFatherCommands', async (global, actions, payload): Promise<void> => {
+  const { commands, tabId = getCurrentTabId() } = payload;
+  const modal = selectTabState(global, tabId).botFatherModal;
+  if (!modal?.selectedBotId) return;
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...modal,
+      isSavingCommands: true,
+    },
+  }, tabId);
+  setGlobal(global);
+
+  const result = await saveCommandsViaBotFather(modal.selectedBotId, commands);
+
+  global = getGlobal();
+  const currentModal = selectTabState(global, tabId).botFatherModal;
+  if (!currentModal) return;
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...currentModal,
+      isSavingCommands: undefined,
+    },
+  }, tabId);
+  setGlobal(global);
+
+  if (!result || 'error' in result) {
+    actions.showNotification({
+      message: { key: result?.error || 'BotFatherCommandsError' },
+      tabId,
+    });
+    return;
+  }
+
+  actions.loadFullUser({ userId: modal.selectedBotId });
+  actions.setBotFatherModalView({ view: 'commands', tabId });
+  actions.showNotification({
+    message: { key: 'BotFatherCommandsSaved' },
+    tabId,
+  });
+});
+
+addActionHandler('deleteBotViaBotFather', async (global, actions, payload): Promise<void> => {
+  const { tabId = getCurrentTabId() } = payload || {};
+  const modal = selectTabState(global, tabId).botFatherModal;
+  if (!modal?.selectedBotId) return;
+
+  const botId = modal.selectedBotId;
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...modal,
+      isDeletingBot: true,
+    },
+  }, tabId);
+  setGlobal(global);
+
+  const result = await deleteBotWithBotFather(botId);
+
+  global = getGlobal();
+  const currentModal = selectTabState(global, tabId).botFatherModal;
+  if (!currentModal) return;
+
+  if (!result || 'error' in result) {
+    global = updateTabState(global, {
+      botFatherModal: {
+        ...currentModal,
+        isDeletingBot: undefined,
+      },
+    }, tabId);
+    setGlobal(global);
+    actions.showNotification({
+      message: { key: result?.error || 'BotFatherDeleteError' },
+      tabId,
+    });
+    return;
+  }
+
+  const remainingIds = (currentModal.adminedBotIds || []).filter((id) => id !== botId);
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...currentModal,
+      view: 'home',
+      selectedBotId: undefined,
+      botToken: undefined,
+      isDeletingBot: undefined,
+      adminedBotIds: remainingIds,
+    },
+  }, tabId);
+  setGlobal(global);
+
+  actions.showNotification({
+    message: { key: 'BotFatherDeleteSuccess' },
+    tabId,
+  });
+  actions.loadAdminedBots({ tabId });
+});
+
+addActionHandler('runBotFatherManageCommand', async (global, actions, payload): Promise<void> => {
+  const { command, tabId = getCurrentTabId() } = payload;
+  const modal = selectTabState(global, tabId).botFatherModal;
+  if (!modal?.selectedBotId) return;
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...modal,
+      isRunningManageCommand: true,
+    },
+  }, tabId);
+  setGlobal(global);
+
+  const result = await primeBotFatherManageCommand(modal.selectedBotId, command);
+
+  global = getGlobal();
+  const currentModal = selectTabState(global, tabId).botFatherModal;
+  if (!currentModal) return;
+
+  global = updateTabState(global, {
+    botFatherModal: {
+      ...currentModal,
+      isRunningManageCommand: undefined,
+    },
+  }, tabId);
+  setGlobal(global);
+
+  if (!result || 'error' in result) {
+    actions.showNotification({
+      message: { key: result?.error || 'BotFatherAutomationError' },
+      tabId,
+    });
+    return;
+  }
+
+  actions.showNotification({
+    message: { key: 'BotFatherManageCommandSent' },
+    tabId,
+  });
+});
+
 addActionHandler('startBotFatherConversation', async (global, actions, payload): Promise<void> => {
   const {
     param,
     tabId = getCurrentTabId(),
-  } = payload;
+  } = payload || {};
 
   if (!botFatherId) {
     const chat = await fetchChatByUsername(global, BOT_FATHER_USERNAME);

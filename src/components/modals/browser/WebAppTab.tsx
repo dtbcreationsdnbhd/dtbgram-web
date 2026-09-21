@@ -24,9 +24,11 @@ import {
   selectUserFullInfo,
 } from '../../../global/selectors';
 import { IFRAME_ALLOW_ATTRIBUTES, IFRAME_SANDBOX_ATTRIBUTES } from '../../../util/browser/iframe';
+import { openWebAppExternally } from '../../../util/browser/openWebAppExternally';
 import { getGeolocationStatus, IS_GEOLOCATION_SUPPORTED } from '../../../util/browser/windowEnvironment';
 import buildClassName from '../../../util/buildClassName';
 import buildStyle from '../../../util/buildStyle.ts';
+import { copyTextToClipboard } from '../../../util/clipboard';
 import download from '../../../util/download';
 import { extractCurrentThemeParams, FALLBACK_THEME_PARAMS, validateHexColor } from '../../../util/themeStyle';
 import { callApi } from '../../../api/gramjs';
@@ -55,6 +57,7 @@ import Transition from '../../ui/Transition';
 
 import styles from './WebAppTab.module.scss';
 
+const EMBED_HANDSHAKE_TIMEOUT_MS = 8000;
 type WebAppButton = {
   isVisible: boolean;
   isActive: boolean;
@@ -150,6 +153,11 @@ const WebAppTab = ({
   const [secondaryButton, setSecondaryButton] = useState<WebAppButton>();
 
   const [isLoaded, markLoaded, markUnloaded] = useFlag(false);
+  const [hasHandshake, markHandshake, markNoHandshake] = useFlag(false);
+  const [isEmbedFallbackVisible, showEmbedFallback, hideEmbedFallback] = useFlag(false);
+  const [isFrameRevealed, revealFrame, concealFrame] = useFlag(false);
+  const embedHandshakeTimeoutRef = useRef<number>();
+  const hasHandshakeRef = useRef(false);
 
   const [popupParameters, setPopupParameters] = useState<PopupOptions>();
 
@@ -259,12 +267,49 @@ const WebAppTab = ({
 
   const {
     reloadFrame, sendEvent, sendFullScreenChanged, sendViewport, sendSafeArea, sendTheme,
-  } = useWebAppFrame(frameRef, isOpen, isFullscreen, isSimple, handleEvent, webApp, markLoaded);
+  } = useWebAppFrame(
+    frameRef,
+    isOpen,
+    isFullscreen,
+    isSimple,
+    handleEvent,
+    webApp,
+    markLoaded,
+    () => {
+      hasHandshakeRef.current = true;
+      markHandshake();
+      revealFrame();
+      hideEmbedFallback();
+    },
+  );
+
+  useEffect(() => {
+    if (!isOpen || !url || hasHandshake || isEmbedFallbackVisible) {
+      window.clearTimeout(embedHandshakeTimeoutRef.current);
+      return undefined;
+    }
+
+    embedHandshakeTimeoutRef.current = window.setTimeout(() => {
+      if (hasHandshakeRef.current) return;
+      showEmbedFallback();
+      markLoaded();
+    }, EMBED_HANDSHAKE_TIMEOUT_MS);
+
+    return () => {
+      window.clearTimeout(embedHandshakeTimeoutRef.current);
+    };
+  }, [hasHandshake, isEmbedFallbackVisible, isOpen, markLoaded, showEmbedFallback, url]);
+
+  useEffect(() => {
+    if (hasHandshake) {
+      window.clearTimeout(embedHandshakeTimeoutRef.current);
+      hideEmbedFallback();
+    }
+  }, [hasHandshake, hideEmbedFallback]);
 
   useEffect(() => {
     if (isActive) registerSendEventCallback(sendEvent);
   }, [sendEvent, registerSendEventCallback, isActive]);
-
   useEffect(() => {
     if (isActive) registerReloadFrameCallback(reloadFrame);
   }, [reloadFrame, registerReloadFrameCallback, isActive]);
@@ -634,6 +679,11 @@ const WebAppTab = ({
       setSecondaryButton(undefined);
       setRequestedFileDownload(undefined);
       setClipboardRequestId(undefined);
+      window.clearTimeout(embedHandshakeTimeoutRef.current);
+      hasHandshakeRef.current = false;
+      markNoHandshake();
+      hideEmbedFallback();
+      concealFrame();
       updateCurrentWebApp({
         isSettingsButtonVisible: false,
         shouldConfirmClosing: false,
@@ -644,6 +694,42 @@ const WebAppTab = ({
       markUnloaded();
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    hasHandshakeRef.current = false;
+    markNoHandshake();
+    hideEmbedFallback();
+    concealFrame();
+    markUnloaded();
+  }, [url]);
+
+  const handleOpenExternally = useLastCallback(() => {
+    if (!url) return;
+
+    const result = openWebAppExternally(url);
+    if (result === 'failed') {
+      showNotification({
+        message: { key: 'WebAppOpenExternallyFailed' },
+      });
+      return;
+    }
+
+    closeCurrentWebApp();
+  });
+
+  const handleCopyWebAppLink = useLastCallback(() => {
+    if (!url) return;
+    copyTextToClipboard(url);
+    showNotification({
+      message: { key: 'LinkCopied' },
+    });
+  });
+
+  const handleContinueEmbedAnyway = useLastCallback(() => {
+    hideEmbedFallback();
+    revealFrame();
+    markLoaded();
+  });
 
   const handleOpenChat = useLastCallback(() => {
     openChatWithInfo({ id: bot!.id });
@@ -1192,6 +1278,30 @@ const WebAppTab = ({
     );
   }
 
+  function renderEmbedFallback() {
+    if (!isEmbedFallbackVisible || isMinimizedState) return undefined;
+
+    return (
+      <div className={styles.embedFallback}>
+        <Icon name="link-broken" className={styles.embedFallbackIcon} />
+        <p className={styles.embedFallbackText}>
+          {lang('WebAppEmbedBlockedText')}
+        </p>
+        <div className={styles.embedFallbackActions}>
+          <Button color="primary" size="smaller" onClick={handleOpenExternally}>
+            {lang('WebAppOpenInBrowser')}
+          </Button>
+          <Button color="primary" isText size="smaller" onClick={handleCopyWebAppLink}>
+            {lang('CopyLink')}
+          </Button>
+          <Button color="primary" isText size="smaller" onClick={handleContinueEmbedAnyway}>
+            {lang('WebAppEmbedContinueAnyway')}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   function renderBottomButtonContent(text: string | undefined, iconCustomEmojiId?: string) {
     const hasText = Boolean(text?.trim().length);
     if (!hasText && !iconCustomEmojiId) return undefined;
@@ -1228,12 +1338,13 @@ const WebAppTab = ({
       )}
     >
       {isFullscreen && getIsWebAppsFullscreenSupported() && renderFullscreenHeaderPanel()}
-      {!isMinimizedState && renderPlaceholder()}
+      {!isMinimizedState && !isEmbedFallbackVisible && !isFrameRevealed && renderPlaceholder()}
+      {renderEmbedFallback()}
       <iframe
         className={buildClassName(
           styles.frame,
           shouldDecreaseWebFrameSize && styles.withButton,
-          !isLoaded && styles.hide,
+          (!isFrameRevealed || isEmbedFallbackVisible) && styles.hide,
         )}
         style={frameStyle}
         src={url}

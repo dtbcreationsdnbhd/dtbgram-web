@@ -335,6 +335,8 @@
     "bots.invokeWebViewCustomMethod",
     "bots.getPopularAppBots",
     "bots.setBotInfo",
+    "bots.getBotInfo",
+    "bots.getAdminedBots",
     "bots.getPreviewMedias",
     "bots.checkDownloadFileParams",
     "bots.toggleUserEmojiStatusPermission",

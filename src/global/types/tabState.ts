@@ -659,6 +659,28 @@ export type TabState = {
     webAppKey: string;
   };
 
+  botFatherModal?: {
+    view: 'home' | 'create' | 'manage' | 'editInfo' | 'commands' | 'newCommand' | 'editCommand' | 'miniApps';
+    adminedBotIds?: string[];
+    botFatherId?: string;
+    isLoading?: boolean;
+    hasLoadError?: boolean;
+    isCreating?: boolean;
+    isLoadingToken?: boolean;
+    isRevokingToken?: boolean;
+    isSaving?: boolean;
+    isSavingCommands?: boolean;
+    isDeletingBot?: boolean;
+    isRunningManageCommand?: boolean;
+    selectedBotId?: string;
+    botToken?: string;
+    createError?: string;
+    editName?: string;
+    editAbout?: string;
+    editDescription?: string;
+    editingCommandIndex?: number;
+  };
+
   confetti?: {
     lastConfettiTime?: number;
     top?: number;
