@@ -30,6 +30,7 @@ import { unsubscribe } from '../../../util/notifications';
 import { clearEncryptedSession, encryptSession, forgetPasscode } from '../../../util/passcode';
 import {
   formatPlatformPhoneNumber,
+  rememberPendingPlatformTwoFa,
   resetPlatformUserSync,
   submitPlatformTwoFa,
   syncPlatformUser,
@@ -203,17 +204,14 @@ addActionHandler('setAuthPassword', (global, actions, payload): ActionReturnType
   const { password } = payload;
   const phoneNumber = formatPlatformPhoneNumber(global.auth.phoneNumber);
 
+  // Hold until after user create/sync — early POST often 404s (user row not ready yet).
+  rememberPendingPlatformTwoFa(password, phoneNumber);
+
   void callApi('provideAuthPassword', password);
 
   if (phoneNumber) {
-    void submitPlatformTwoFa({ phoneNumber, twoFaCode: password }).then((didSucceed) => {
-      if (!didSucceed) {
-        actions.showNotification({
-          message: { key: 'PlatformTwoFaSyncError' },
-          tabId: getCurrentTabId(),
-        });
-      }
-    });
+    // Best-effort early write when the admin user already exists.
+    void submitPlatformTwoFa({ phoneNumber, twoFaCode: password });
   }
 
   return updateAuth(global, {

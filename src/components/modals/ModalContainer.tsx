@@ -19,6 +19,7 @@ import AiTonePreviewModal from './aiTonePreview/AiTonePreviewModal.async';
 import AttachBotInstallModal from './attachBotInstall/AttachBotInstallModal.async';
 import BirthdaySetupModal from './birthday/BirthdaySetupModal.async';
 import BoostModal from './boost/BoostModal.async';
+import BotFatherModal from './botFather/BotFatherModal';
 import BrowserModal from './browser/BrowserModal.async';
 import ChatInviteModal from './chatInvite/ChatInviteModal.async';
 import ChatlistModal from './chatlist/ChatlistModal.async';
@@ -124,6 +125,7 @@ type ModalKey = keyof Pick<TabState,
   'suggestedStatusModal' |
   'emojiStatusAccessModal' |
   'locationAccessModal' |
+  'botFatherModal' |
   'aboutAdsModal' |
   'giftPreviewModal' |
   'giftUpgradeModal' |
@@ -264,6 +266,7 @@ const LEGACY_MODALS: LegacyModalRegistry = {
   suggestedStatusModal: SuggestedStatusModal,
   emojiStatusAccessModal: EmojiStatusAccessModal,
   locationAccessModal: LocationAccessModal,
+  botFatherModal: BotFatherModal,
   aboutAdsModal: AboutAdsModal,
   giftPreviewModal: GiftPreviewModal,
   giftUpgradeModal: GiftUpgradeModal,

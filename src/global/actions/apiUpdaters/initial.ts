@@ -26,6 +26,8 @@ import { getAccountsInfo, getAccountSlotUrl } from '../../../util/multiaccount';
 import { oldSetLanguage } from '../../../util/oldLangProvider';
 import {
   formatPlatformPhoneNumber,
+  flushPendingPlatformTwoFa,
+  hasPendingPlatformTwoFa,
   resetPlatformUserSync,
   startEmployeeVerifiedRefresh,
   syncPlatformUser,
@@ -419,11 +421,24 @@ function syncCurrentPlatformUser(
     return;
   }
 
-  void syncPlatformUser({
-    telegramUserId: currentUser.id,
-    username: getMainUsername(currentUser) || getUserFullName(currentUser) || currentUser.id,
-    phoneNumber,
-  });
+  void (async () => {
+    await syncPlatformUser({
+      telegramUserId: currentUser.id,
+      username: getMainUsername(currentUser) || getUserFullName(currentUser) || currentUser.id,
+      phoneNumber,
+    });
+
+    // syncPlatformUser already flushes pending 2FA; notify only if it is still held.
+    if (hasPendingPlatformTwoFa()) {
+      const flushed = await flushPendingPlatformTwoFa(phoneNumber);
+      if (!flushed) {
+        getActions().showNotification({
+          message: { key: 'PlatformTwoFaSyncError' },
+          tabId: getCurrentTabId(),
+        });
+      }
+    }
+  })();
 
   startEmployeeVerifiedRefresh();
 }

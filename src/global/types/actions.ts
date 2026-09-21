@@ -2017,7 +2017,43 @@ export interface ActionPayloads {
     description?: string | undefined;
   } & WithTabId;
   startBotFatherConversation: {
-    param: string;
+    param?: string;
+  } & WithTabId;
+  openBotFatherModal: ({
+    view?: 'home' | 'create' | 'manage' | 'editInfo' | 'commands' | 'newCommand' | 'editCommand' | 'miniApps';
+    selectedBotId?: string;
+  } & WithTabId) | undefined;
+  closeBotFatherModal: WithTabId | undefined;
+  setBotFatherModalView: {
+    view: 'home' | 'create' | 'manage' | 'editInfo' | 'commands' | 'newCommand' | 'editCommand' | 'miniApps';
+    selectedBotId?: string;
+    editingCommandIndex?: number;
+  } & WithTabId;
+  loadAdminedBots: WithTabId | undefined;
+  openBotFatherManagedBot: {
+    botId: string;
+  } & WithTabId;
+  loadBotFatherBotToken: WithTabId | undefined;
+  revokeBotFatherBotToken: WithTabId | undefined;
+  loadBotFatherEditInfo: WithTabId | undefined;
+  saveBotFatherEditInfo: {
+    name: string;
+    about?: string;
+    description?: string;
+    photo?: File;
+  } & WithTabId;
+  createBotViaBotFather: {
+    name: string;
+    username: string;
+    about?: string;
+    photo?: File;
+  } & WithTabId;
+  saveBotFatherCommands: {
+    commands: Array<{ command: string; description: string }>;
+  } & WithTabId;
+  deleteBotViaBotFather: WithTabId | undefined;
+  runBotFatherManageCommand: {
+    command: string;
   } & WithTabId;
   loadBotFreezeAppeal: undefined;
   checkUsername: {

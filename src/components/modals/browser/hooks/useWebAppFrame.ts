@@ -44,6 +44,7 @@ const useWebAppFrame = (
   onEvent: (event: WebAppInboundEvent) => void,
   webApp?: WebApp,
   onLoad?: () => void,
+  onHandshake?: NoneToVoidFunction,
 ) => {
   const {
     showNotification,
@@ -183,6 +184,12 @@ const useWebAppFrame = (
     try {
       const data = JSON.parse(event.data) as WebAppInboundEvent;
       const { eventType, eventData } = data;
+
+      // Any Mini App bridge traffic means the page loaded and can talk to the client.
+      if (eventType === 'web_app_ready' || eventType === 'iframe_ready' || eventType.startsWith('web_app_')) {
+        onHandshake?.();
+      }
+
       // Handle some app requests here to simplify hook usage
       if (eventType === 'web_app_ready') {
         onLoad?.();
@@ -386,7 +393,7 @@ const useWebAppFrame = (
     }
   }, [
     isSimpleView, isSameOrigin, sendEvent, onEvent, sendCustomStyle, webApp, webAppOrigin,
-    sendTheme, sendViewport, sendSafeArea, onLoad, windowSize.isResizing,
+    sendTheme, sendViewport, sendSafeArea, onLoad, onHandshake, windowSize.isResizing,
     ref,
   ]);
 
