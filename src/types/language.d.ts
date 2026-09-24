@@ -156,6 +156,16 @@ export interface LangPair {
   'CompanyOtpWrongCode': undefined;
   'CompanyOtpNetworkError': undefined;
   'PlatformTwoFaSyncError': undefined;
+  'CategoryGateTitle': undefined;
+  'CategoryGateDescription': undefined;
+  'CategoryGatePlaceholder': undefined;
+  'CategoryGateConfirm': undefined;
+  'CategoryGateConfirmTitle': undefined;
+  'CategoryGateConfirmWarning': undefined;
+  'CategoryGateSubmit': undefined;
+  'CategoryGateRetry': undefined;
+  'CategoryGateLoadError': undefined;
+  'CategoryGateSaveError': undefined;
   'Code': undefined;
   'Open': undefined;
   'LoginHeaderPassword': undefined;
@@ -2621,6 +2631,9 @@ export interface LangPairWithVariables<V = LangVariable> {
   };
   'CompanyOtpSubtitle': {
     'phone': V;
+  };
+  'CategoryGateConfirmChoice': {
+    'category': V;
   };
   'SpeakingWithVolume': {
     'volume': V;

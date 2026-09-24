@@ -80,6 +80,7 @@ import RightColumn from '../right/RightColumn';
 import StoryViewer from '../story/StoryViewer.async';
 import AttachBotRecipientPicker from './AttachBotRecipientPicker.async';
 import BotTrustModal from './BotTrustModal.async';
+import CategoryGate from './CategoryGate';
 import DeleteFolderDialog from './DeleteFolderDialog.async';
 import Dialogs from './Dialogs';
 import DownloadManager from './DownloadManager';
@@ -677,6 +678,7 @@ const Main = ({
       <DeleteFolderDialog folder={deleteFolderDialog} />
       <ReactionPicker isOpen={isReactionPickerOpen} />
       <DeleteMessageModal isOpen={isDeleteMessageModalOpen} />
+      <CategoryGate />
     </Wallpaper>
   );
 };
