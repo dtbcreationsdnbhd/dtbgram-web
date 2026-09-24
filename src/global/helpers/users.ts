@@ -5,12 +5,17 @@ import { ANONYMOUS_USER_ID, SERVICE_NOTIFICATIONS_USER_ID } from '../../config';
 import { formatFullDate, formatTime } from '../../util/dates/oldDateFormat';
 import { DAY } from '../../util/dates/units';
 import { orderBy } from '../../util/iteratees';
+import { JUST_CHAT_TITLE } from '../../util/officialTelegramAds';
 import { formatPhoneNumber } from '../../util/phoneNumber';
 import { getServerTime, getServerTimeOffset } from '../../util/serverTime';
 
 export function getUserFirstOrLastName(user?: ApiUser) {
   if (!user) {
     return undefined;
+  }
+
+  if (user.id === SERVICE_NOTIFICATIONS_USER_ID) {
+    return JUST_CHAT_TITLE;
   }
 
   switch (user.type) {
@@ -33,6 +38,10 @@ export function getUserFirstOrLastName(user?: ApiUser) {
 export function getUserFullName(user?: ApiUser) {
   if (!user) {
     return undefined;
+  }
+
+  if (user.id === SERVICE_NOTIFICATIONS_USER_ID) {
+    return JUST_CHAT_TITLE;
   }
 
   if (isDeletedUser(user)) {

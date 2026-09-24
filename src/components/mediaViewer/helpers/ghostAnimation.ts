@@ -32,6 +32,7 @@ export function animateOpening(
   message?: ApiMessage,
   mediaIndex?: number,
   sourceId?: string,
+  forceCircle?: boolean,
 ) {
   const { mediaEl: fromImage } = getNodes(origin, message, mediaIndex, sourceId);
   if (!fromImage) {
@@ -79,7 +80,7 @@ export function animateOpening(
       height: `${toHeight}px`,
       transform: `translate3d(${fromTranslateX}px, ${fromTranslateY}px, 0) scale(${fromScaleX}, ${fromScaleY})`,
     });
-    applyShape(ghost, origin);
+    applyShape(ghost, origin, forceCircle);
 
     getGhostHost().appendChild(ghost);
     document.body.classList.add('ghost-animating');
@@ -566,7 +567,12 @@ function getNodes(origin: MediaViewerOrigin, message?: ApiMessage, index?: numbe
   };
 }
 
-function applyShape(ghost: HTMLDivElement, origin: MediaViewerOrigin) {
+function applyShape(ghost: HTMLDivElement, origin: MediaViewerOrigin, forceCircle?: boolean) {
+  if (forceCircle) {
+    ghost.classList.add('circle');
+    return;
+  }
+
   switch (origin) {
     case MediaViewerOrigin.Album:
     case MediaViewerOrigin.ScheduledAlbum:

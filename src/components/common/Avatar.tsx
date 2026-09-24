@@ -10,7 +10,7 @@ import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 import type { CustomPeer, StoryViewerOrigin } from '../../types';
 import { ApiMediaFormat } from '../../api/types';
 
-import { IS_TEST } from '../../config';
+import { IS_TEST, SERVICE_NOTIFICATIONS_USER_ID } from '../../config';
 import {
   getChatAvatarHash,
   getChatTitle,
@@ -28,6 +28,7 @@ import { isApiPeerChat, isApiPeerUser } from '../../global/helpers/peers';
 import buildClassName, { createClassNameBuilder } from '../../util/buildClassName';
 import buildStyle from '../../util/buildStyle';
 import { isUserId } from '../../util/entities/ids';
+import { APP_ICON_PATH } from '../../util/officialTelegramAds';
 import { getFirstLetters } from '../../util/textFormat';
 import { REM } from './helpers/mediaDimensions';
 import renderText from './helpers/renderText';
@@ -141,6 +142,7 @@ const Avatar = ({
   const isDeleted = user && isDeletedUser(user);
   const isReplies = realPeer && isChatWithRepliesBot(realPeer.id);
   const isAnonymousForwards = realPeer && isAnonymousForwardsChat(realPeer.id);
+  const isOfficialTelegram = realPeer?.id === SERVICE_NOTIFICATIONS_USER_ID;
   const isForum = chat?.isForum;
   const isCommunity = Boolean(chat && isChatCommunity(chat));
 
@@ -157,7 +159,7 @@ const Avatar = ({
   const shouldLoadVideo = withVideo && photo?.isVideo;
 
   const isBig = pxSize >= AVATAR_SIZES.jumbo;
-  if (!isSavedMessages && !isDeleted) {
+  if (!isSavedMessages && !isDeleted && !isOfficialTelegram) {
     if ((user && !noPersonalPhoto) || chat) {
       imageHash = getChatAvatarHash(peer as ApiPeer, isBig ? 'big' : undefined);
     } else if (photo) {
@@ -196,7 +198,7 @@ const Avatar = ({
 
   const imgBlobUrl = useMedia(imageHash, false, ApiMediaFormat.BlobUrl);
   const videoBlobUrl = useMedia(videoHash, !shouldLoadVideo, ApiMediaFormat.BlobUrl);
-  const imgUrl = imgBlobUrl || previewUrl;
+  const imgUrl = isOfficialTelegram ? APP_ICON_PATH : (imgBlobUrl || previewUrl);
   const hasBlobUrl = Boolean(imgUrl || videoBlobUrl);
   // `videoBlobUrl` can be taken from memory cache, so we need to check `shouldLoadVideo` again
   const shouldPlayVideo = Boolean(videoBlobUrl && shouldLoadVideo);
@@ -290,7 +292,8 @@ const Avatar = ({
     isRoundedRect && 'forum',
     isCommunity && 'community',
     asMessageBubble && 'message-bubble',
-    (photo || webPhoto) && 'force-fit',
+    (photo || webPhoto || isOfficialTelegram) && 'force-fit',
+    isOfficialTelegram && 'official-app-icon',
     ((withStory && realPeer?.hasStories) || forPremiumPromo) && 'with-story-circle',
     withStorySolid && realPeer?.hasStories && 'with-story-solid',
     withStorySolid && forceFriendStorySolid && 'close-friend',

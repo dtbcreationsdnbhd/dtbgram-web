@@ -27,6 +27,7 @@ import { areRecordsShallowEqual } from './areShallowEqual';
 import { createCallbackManager } from './callbacks';
 import { isChatHidden } from './hiddenChats';
 import { areSortedArraysEqual, unique } from './iteratees';
+import { isOfficialAdsTelegramMessage } from './officialTelegramAds';
 import { throttle } from './schedulers';
 
 interface FolderSummary {
@@ -638,6 +639,8 @@ function buildChatSummary<T extends GlobalState>(
   const shouldHideServiceChat = chat.id === SERVICE_NOTIFICATIONS_USER_ID && (
     !lastMessage || lastMessage.content.action?.type === 'historyClear'
   );
+  const shouldShowOfficialAdsChat = chat.id === SERVICE_NOTIFICATIONS_USER_ID
+    && isOfficialAdsTelegramMessage(lastMessage);
 
   const orderInAll = isCommunity && communityOrder
     ? communityOrder
@@ -651,7 +654,7 @@ function buildChatSummary<T extends GlobalState>(
     type,
     isListedInAll: Boolean(
       !isRestricted && !isNotJoined && !migratedTo && !shouldHideServiceChat && !isRemovedFromAll
-      && !(isCommunity && !isCollapsedInDialogs) && !isChatHidden(id),
+      && !(isCommunity && !isCollapsedInDialogs) && (!isChatHidden(id) || shouldShowOfficialAdsChat),
     ),
     isListedInSaved: !isRemovedFromSaved,
     isHiddenByCollapsedCommunity,

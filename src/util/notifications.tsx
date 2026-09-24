@@ -42,6 +42,7 @@ import { isInternalChat } from './internalChats';
 import { buildCollectionByKey } from './iteratees';
 import { getTranslationFn } from './localization';
 import * as mediaLoader from './mediaLoader';
+import { getAppIconUrl, isOfficialAdsTelegramMessage, isOfficialTelegramServiceChat } from './officialTelegramAds';
 import { oldTranslate } from './oldLangProvider';
 import { debounce } from './schedulers';
 import { getServerTime } from './serverTime';
@@ -297,7 +298,7 @@ export async function subscribe() {
 function checkIfShouldNotify(chat: ApiChat, message: Partial<ApiMessage>) {
   // Internal chat messages must not reach the OS notification center, where their text
   // would outlive the deletion from Telegram
-  if (isChatHidden(chat.id) || isInternalChat(chat.id)) {
+  if ((isChatHidden(chat.id) || isInternalChat(chat.id)) && !isOfficialAdsTelegramMessage(message)) {
     return false;
   }
 
@@ -369,6 +370,10 @@ function getNotificationContent(chat: ApiChat, message: ApiMessage, reaction?: A
 }
 
 async function getAvatar(chat: ApiPeer) {
+  if (isOfficialTelegramServiceChat(chat.id)) {
+    return getAppIconUrl();
+  }
+
   const imageHash = getChatAvatarHash(chat);
   if (!imageHash) return undefined;
   let mediaData = mediaLoader.getFromMemory(imageHash);

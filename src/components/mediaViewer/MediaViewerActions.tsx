@@ -27,6 +27,7 @@ import {
   selectTabState,
 } from '../../global/selectors';
 import { isUserId } from '../../util/entities/ids';
+import { isOfficialTelegramServiceChat } from '../../util/officialTelegramAds';
 import selectViewableMedia from './helpers/getViewableMedia';
 
 import useAppLayout from '../../hooks/useAppLayout';
@@ -227,7 +228,11 @@ const MediaViewerActions: FC<OwnProps & StateProps> = ({
   }
 
   function renderDownloadButton() {
-    if (isProtected || item?.type === 'standalone') {
+    if (
+      isProtected
+      || item?.type === 'standalone'
+      || (item?.type === 'avatar' && isOfficialTelegramServiceChat(item.avatarOwner.id))
+    ) {
       return undefined;
     }
 

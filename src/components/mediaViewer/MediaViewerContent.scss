@@ -26,11 +26,16 @@
     }
   }
 
-  > img {
+  >img {
     max-width: 100vw;
     max-height: calc(100vh - 8.25rem);
     object-fit: contain;
     transition: transform 0.2s;
+  }
+
+  img.official-app-icon {
+    border-radius: 100%;
+    object-fit: cover;
   }
 
   .spinner-wrapper {
@@ -42,7 +47,8 @@
     margin: auto;
   }
 
-  img, video {
+  img,
+  video {
     dynamic-range-limit: no-limit;
   }
 }
