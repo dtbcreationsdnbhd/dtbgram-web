@@ -45,7 +45,7 @@
     font-size: calc(var(--_size) / 2);
   }
 
-  > .inner {
+  >.inner {
     position: absolute;
     z-index: 1;
     top: 0;
@@ -73,7 +73,7 @@
   }
 
   &.official-app-icon {
-    > .inner {
+    >.inner {
       background-image: none;
     }
 
@@ -90,7 +90,7 @@
   &.with-story-circle {
     z-index: 1;
 
-    > .inner {
+    >.inner {
       top: 0.1875rem;
       left: 0.1875rem;
       width: calc(100% - 0.375rem);
@@ -140,8 +140,7 @@
 
   &.has-unread-story::before {
     background-image:
-      linear-gradient(
-        215.87deg,
+      linear-gradient(215.87deg,
         var(--color-avatar-story-unread-from) -1.61%,
         var(--color-avatar-story-unread-to) 97.44%,
       );
@@ -149,8 +148,7 @@
 
   &.has-unread-story.close-friend::before {
     background-image:
-      linear-gradient(
-        215.87deg,
+      linear-gradient(215.87deg,
         var(--color-avatar-story-friend-unread-from) -1.61%,
         var(--color-avatar-story-friend-unread-to) 97.44%,
       );
@@ -174,6 +172,7 @@
   // containers that would clip them opt out via `.Chat.community`. `.inner` sits at
   // a higher `z-index`, so both layers stay behind the avatar itself.
   &.community {
+
     &::before,
     &::after {
       content: '';
@@ -212,7 +211,7 @@
     --color-user: var(--color-deleted-account);
   }
 
-  &.premium-gradient-bg > .inner {
+  &.premium-gradient-bg>.inner {
     background-image: var(--premium-gradient);
   }
 
