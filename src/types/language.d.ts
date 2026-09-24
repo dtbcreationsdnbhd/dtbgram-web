@@ -2507,6 +2507,7 @@ export interface LangPair {
   'ChatClearHistory': undefined;
   'ChatClearHistoryConfirm': undefined;
   'HeaderMenuViewChannelInfo': undefined;
+  'JustChat': undefined;
 }
 
 export interface LangPairWithVariables<V = LangVariable> {

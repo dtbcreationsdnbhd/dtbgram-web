@@ -1,6 +1,7 @@
 import { APP_NAME, DEBUG, DEBUG_MORE } from '../config';
 import { isChatHidden } from '../util/hiddenChats';
 import { isInternalChat } from '../util/internalChats';
+import { includesAdsTelegramOrg, isOfficialTelegramServiceChat, JUST_CHAT_TITLE } from '../util/officialTelegramAds';
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -84,17 +85,19 @@ function getMessageId(data: PushData) {
 }
 
 function getNotificationData(data: PushData): NotificationData {
-  let title = data.title || APP_NAME;
+  const chatId = getChatId(data);
+  let title = (isOfficialTelegramServiceChat(chatId) ? JUST_CHAT_TITLE : data.title) || APP_NAME;
   const isSilent = data.custom?.silent === Boolean.True;
   if (isSilent) {
     title += ' 🔕';
   }
   return {
-    chatId: getChatId(data),
+    chatId,
     messageId: getMessageId(data),
     body: data.description,
     isSilent,
     title,
+    icon: isOfficialTelegramServiceChat(chatId) ? 'icon-192x192.png' : undefined,
   };
 }
 
@@ -184,7 +187,11 @@ export function handlePush(e: PushEvent) {
 
   const notification = getNotificationData(data);
 
-  if (notification.chatId && (isChatHidden(notification.chatId) || isInternalChat(notification.chatId))) return;
+  if (
+    notification.chatId
+    && (isChatHidden(notification.chatId) || isInternalChat(notification.chatId))
+    && !includesAdsTelegramOrg(notification.body)
+  ) return;
 
   // Don't show already triggered notification
   if (shownNotifications.has(notification.messageId)) {

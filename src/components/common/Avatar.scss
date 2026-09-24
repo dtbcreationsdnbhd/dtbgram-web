@@ -72,6 +72,17 @@
     object-fit: cover;
   }
 
+  &.official-app-icon {
+    > .inner {
+      background-image: none;
+    }
+
+    &__media {
+      transform: scale(1.4);
+      object-fit: cover;
+    }
+  }
+
   &.interactive {
     cursor: var(--custom-cursor, pointer);
   }

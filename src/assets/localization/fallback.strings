@@ -3364,3 +3364,4 @@
 "ChatClearHistory" = "Clear History";
 "ChatClearHistoryConfirm" = "Delete all messages in this chat? The chat will stay in your chat list.";
 "HeaderMenuViewChannelInfo" = "View channel info";
+"JustChat" = "JustChat";

@@ -22,11 +22,12 @@ import { MAIN_THREAD_ID } from '../../api/types';
 
 import {
   ANONYMOUS_USER_ID,
-  ARCHIVED_FOLDER_ID, GENERAL_TOPIC_ID, REPLIES_USER_ID, TME_LINK_PREFIX,
+  ARCHIVED_FOLDER_ID, GENERAL_TOPIC_ID, REPLIES_USER_ID, SERVICE_NOTIFICATIONS_USER_ID, TME_LINK_PREFIX,
   VERIFICATION_CODES_USER_ID,
 } from '../../config';
 import { formatDateToString, formatTime } from '../../util/dates/oldDateFormat';
 import { getPeerIdDividend, isUserId } from '../../util/entities/ids';
+import { JUST_CHAT_TITLE } from '../../util/officialTelegramAds';
 import { getServerTime } from '../../util/serverTime';
 import { selectIsChatRestricted } from '../selectors';
 import { getGlobal } from '..';
@@ -94,6 +95,9 @@ export function getChatTypeLangKey(chat: ApiChat): RegularLangKey {
 export function getChatTitle(lang: OldLangFn | LangFn, chat: ApiChat, isSelf = false) {
   if (isSelf) {
     return lang('SavedMessages');
+  }
+  if (chat.id === SERVICE_NOTIFICATIONS_USER_ID) {
+    return JUST_CHAT_TITLE;
   }
   return chat.title || lang('HiddenName');
 }

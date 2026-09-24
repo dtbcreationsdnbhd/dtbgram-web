@@ -21,6 +21,7 @@ import { IS_CANVAS_FILTER_SUPPORTED } from '../../../util/browser/windowEnvironm
 import buildClassName from '../../../util/buildClassName';
 import buildStyle from '../../../util/buildStyle';
 import { isUserId } from '../../../util/entities/ids';
+import { APP_ICON_PATH, isOfficialTelegramServiceChat } from '../../../util/officialTelegramAds';
 import { getFirstLetters } from '../../../util/textFormat';
 import renderText from '../helpers/renderText';
 
@@ -72,10 +73,14 @@ const ProfilePhoto = ({
   const isRepliesChat = chat && isChatWithRepliesBot(chat.id);
   const isAnonymousForwards = chat && isAnonymousForwardsChat(chat.id);
   const peer = (user || chat)!;
-  const canHaveMedia = peer && !isSavedMessages && !isDeleted && !isRepliesChat && !isAnonymousForwards;
+  const isOfficialTelegram = isOfficialTelegramServiceChat(peer?.id);
+  const canHaveMedia = peer && !isSavedMessages && !isDeleted && !isRepliesChat && !isAnonymousForwards
+    && !isOfficialTelegram;
   const { isVideo } = photo || {};
 
-  const avatarHash = (!photo || photo.id === peer.avatarPhotoId) && getChatAvatarHash(peer, 'normal');
+  const avatarHash = !isOfficialTelegram
+    && (!photo || photo.id === peer.avatarPhotoId)
+    && getChatAvatarHash(peer, 'normal');
 
   const previewHash = canHaveMedia && photo && !avatarHash && getPhotoMediaHash(photo, 'pictogram');
   const previewBlobUrl = useMedia(previewHash || avatarHash);
@@ -126,7 +131,9 @@ const ProfilePhoto = ({
 
   let content: TeactNode | undefined;
 
-  if (specialIcon) {
+  if (isOfficialTelegram) {
+    content = <img src={APP_ICON_PATH} draggable={false} className="avatar-media" alt="" />;
+  } else if (specialIcon) {
     content = <Icon name={specialIcon} role="img" />;
   } else if (hasMedia) {
     content = (
@@ -181,7 +188,8 @@ const ProfilePhoto = ({
     isAnonymousForwards && 'anonymous-forwards',
     isDeleted && 'deleted-account',
     isRepliesChat && 'replies-bot-account',
-    (!isSavedMessages && !hasMedia) && 'no-photo',
+    (!isSavedMessages && !hasMedia && !isOfficialTelegram) && 'no-photo',
+    isOfficialTelegram && 'official-app-icon',
     className,
   );
 

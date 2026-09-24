@@ -15,6 +15,7 @@ import {
 import { selectMessageTimestampableDuration } from '../../global/selectors/media';
 import { IS_TOUCH_ENV } from '../../util/browser/windowEnvironment';
 import buildClassName from '../../util/buildClassName';
+import { APP_ICON_PATH, isOfficialTelegramServiceChat } from '../../util/officialTelegramAds';
 import stopEvent from '../../util/stopEvent';
 import { calculateMediaViewerDimensions } from '../common/helpers/mediaDimensions';
 import { renderMessageText } from '../common/helpers/renderMessageText';
@@ -93,6 +94,9 @@ const MediaViewerContent = ({
   const isAvatar = item.type === 'avatar';
   const isSponsoredMessage = item.type === 'sponsoredMessage';
   const { media, caption } = viewableMedia || {};
+  const overrideUrl = isAvatar && isOfficialTelegramServiceChat(item.avatarOwner.id)
+    ? APP_ICON_PATH
+    : undefined;
 
   const {
     isVideo,
@@ -106,7 +110,7 @@ const MediaViewerContent = ({
     loadProgress,
     retryAsBlob,
   } = useMediaProps({
-    media, isAvatar, origin, delay: withAnimation ? ANIMATION_DURATION : false,
+    media, isAvatar, origin, delay: withAnimation ? ANIMATION_DURATION : false, overrideUrl,
   });
 
   const [, toggleControls] = useControlsSignal();
