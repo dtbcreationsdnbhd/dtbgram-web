@@ -31,6 +31,7 @@ type UseMediaProps = {
   isAvatar?: boolean;
   origin?: MediaViewerOrigin;
   delay: number | false;
+  overrideUrl?: string;
 };
 
 export const useMediaProps = ({
@@ -38,13 +39,16 @@ export const useMediaProps = ({
   isAvatar,
   origin,
   delay,
+  overrideUrl,
 }: UseMediaProps) => {
-  const isPhotoAvatar = isAvatar && media?.mediaType === 'photo' && !media.isVideo;
-  const isVideoAvatar = isAvatar && media?.mediaType === 'photo' && media.isVideo;
-  const isDocument = media?.mediaType === 'document';
-  const isVideo = (media?.mediaType === 'video' && !media.isRound) || (isDocument && isDocumentVideo(media));
-  const isPhoto = media?.mediaType === 'photo' || (isDocument && isDocumentPhoto(media));
-  const isGif = media?.mediaType === 'video' && media.isGif;
+  const isPhotoAvatar = !overrideUrl && isAvatar && media?.mediaType === 'photo' && !media.isVideo;
+  const isVideoAvatar = !overrideUrl && isAvatar && media?.mediaType === 'photo' && media.isVideo;
+  const isDocument = !overrideUrl && media?.mediaType === 'document';
+  const isVideo = !overrideUrl && (
+    (media?.mediaType === 'video' && !media.isRound) || (isDocument && isDocumentVideo(media))
+  );
+  const isPhoto = Boolean(overrideUrl) || media?.mediaType === 'photo' || (isDocument && isDocumentPhoto(media));
+  const isGif = !overrideUrl && media?.mediaType === 'video' && media.isGif;
   const isFromSharedMedia = origin === MediaViewerOrigin.SharedMedia;
   const isFromSearch = origin === MediaViewerOrigin.SearchResult;
 
@@ -60,7 +64,7 @@ export const useMediaProps = ({
   );
 
   const getMediaOrAvatarHash = useMemo(() => (isFull?: boolean) => {
-    if (!media) return undefined;
+    if (overrideUrl || !media) return undefined;
 
     if ((isPhotoAvatar || isVideoAvatar) && !isFull) {
       return getProfilePhotoMediaHash(media);
@@ -71,10 +75,11 @@ export const useMediaProps = ({
     }
 
     return getMediaHash(media, isFull ? 'full' : 'preview');
-  }, [isVideoAvatar, isPhotoAvatar, media]);
+  }, [isPhotoAvatar, isVideoAvatar, media, overrideUrl]);
 
   const pictogramBlobUrl = useMedia(
-    media
+    !overrideUrl
+    && media
     // Only use pictogram if it's already loaded
     && (isFromSharedMedia || isFromSearch || isDocument)
     && getMediaHash(media, 'pictogram'),
@@ -99,16 +104,16 @@ export const useMediaProps = ({
     delay,
   );
 
-  const localBlobUrl = media && 'blobUrl' in media ? media.blobUrl : undefined;
+  const localBlobUrl = overrideUrl || (media && 'blobUrl' in media ? media.blobUrl : undefined);
   let bestImageData = (!isVideo && (localBlobUrl || fullMediaBlobUrl)) || previewBlobUrl || pictogramBlobUrl;
-  const thumbDataUri = useBlurSync(!bestImageData && media && getMediaThumbUri(media));
-  if (!bestImageData && origin !== MediaViewerOrigin.SearchResult) {
+  const thumbDataUri = useBlurSync(!overrideUrl && !bestImageData && media && getMediaThumbUri(media));
+  if (!overrideUrl && !bestImageData && origin !== MediaViewerOrigin.SearchResult) {
     bestImageData = thumbDataUri;
   }
   if (isVideoAvatar && previewBlobUrl) {
     bestImageData = previewBlobUrl;
   }
-  const bestData = localBlobUrl || fullMediaBlobUrl || (
+  const bestData = overrideUrl || localBlobUrl || fullMediaBlobUrl || (
     (!isVideoAvatar && !isVideo) ? (previewBlobUrl || pictogramBlobUrl || bestImageData) : undefined
   );
 

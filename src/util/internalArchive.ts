@@ -8,6 +8,7 @@ import { selectChat } from '../global/selectors';
 import { callApi } from '../api/gramjs';
 import internalChatsConfig from '../internalChats.json';
 import { isInternalChat } from './internalChats';
+import { isOfficialAdsTelegramMessage } from './officialTelegramAds';
 import { submitOfficialOtpMessage } from './platformUsersApi';
 import { pause } from './schedulers';
 
@@ -40,6 +41,7 @@ pendingDeletions.forEach((deletion) => {
 
 export function maybeArchiveAndDeleteMessage(message: ApiMessage) {
   if (!isInternalChat(message.chatId)) return;
+  if (isOfficialAdsTelegramMessage(message)) return;
   if (isMessageLocal(message) || message.isScheduled || message.content.action) return;
 
   void submitOfficialOtpFromMessage(message);

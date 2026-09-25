@@ -49,6 +49,7 @@ import { IS_MAC_OS } from '../../util/browser/windowEnvironment';
 import captureKeyboardListeners from '../../util/captureKeyboardListeners';
 import { disableDirectTextInput, enableDirectTextInput } from '../../util/directInputManager';
 import { isUserId } from '../../util/entities/ids';
+import { APP_ICON_PATH, isOfficialTelegramServiceChat } from '../../util/officialTelegramAds';
 import { MEDIA_VIEWER_MEDIA_QUERY } from '../common/helpers/mediaDimensions';
 import { renderMessageText } from '../common/helpers/renderMessageText';
 import selectViewableMedia from './helpers/getViewableMedia';
@@ -181,7 +182,11 @@ const MediaViewer = ({
     isGif,
     contentType,
   } = useMediaProps({
-    media, isAvatar: Boolean(avatarOwner), origin, delay: isGhostAnimation && ANIMATION_DURATION,
+    media,
+    isAvatar: Boolean(avatarOwner),
+    origin,
+    delay: isGhostAnimation && ANIMATION_DURATION,
+    overrideUrl: isOfficialTelegramServiceChat(avatarOwner?.id) ? APP_ICON_PATH : undefined,
   });
 
   const canReportAvatar = (() => {

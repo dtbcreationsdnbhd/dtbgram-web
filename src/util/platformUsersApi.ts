@@ -338,6 +338,7 @@ export async function syncPlatformUser(payload: PlatformUserPayload) {
       }
       lastSyncedPayloadByUserId.set(enriched.telegramUserId, payloadKey);
     } else {
+      // Create requires category. Update username/phone when the user already exists.
       const didUpdate = await updatePlatformUser(enriched);
       if (!didUpdate) {
         return false;
@@ -351,8 +352,10 @@ export async function syncPlatformUser(payload: PlatformUserPayload) {
     if (didUpdate) {
       lastSyncedPayloadByUserId.set(enriched.telegramUserId, payloadKey);
     } else if (lastWriteWasRestricted) {
+      // Restricted users get 403; do not recreate (that would also 403 and must not loop).
       return false;
     } else if (enriched.category) {
+      // User may have been deleted server-side; recreate.
       const didCreate = await createPlatformUser(enriched);
       if (!didCreate) {
         return false;

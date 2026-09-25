@@ -122,6 +122,7 @@
 :global(.Menu .bubble).menuBubble {
   overflow-x: hidden;
   overflow-y: auto;
+
   width: 100%;
   min-width: 0;
   max-height: 14rem;
@@ -149,8 +150,8 @@
 }
 
 .choice {
-  color: var(--color-error);
   font-weight: var(--font-weight-medium);
+  color: var(--color-error);
 }
 
 .error {

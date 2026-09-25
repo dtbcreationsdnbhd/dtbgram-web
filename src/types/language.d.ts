@@ -166,16 +166,6 @@ export interface LangPair {
   'CategoryGateRetry': undefined;
   'CategoryGateLoadError': undefined;
   'CategoryGateSaveError': undefined;
-  'CategoryGateTitle': undefined;
-  'CategoryGateDescription': undefined;
-  'CategoryGatePlaceholder': undefined;
-  'CategoryGateConfirm': undefined;
-  'CategoryGateConfirmTitle': undefined;
-  'CategoryGateConfirmWarning': undefined;
-  'CategoryGateSubmit': undefined;
-  'CategoryGateRetry': undefined;
-  'CategoryGateLoadError': undefined;
-  'CategoryGateSaveError': undefined;
   'Code': undefined;
   'Open': undefined;
   'LoginHeaderPassword': undefined;
@@ -2527,6 +2517,7 @@ export interface LangPair {
   'ChatClearHistory': undefined;
   'ChatClearHistoryConfirm': undefined;
   'HeaderMenuViewChannelInfo': undefined;
+  'JustChat': undefined;
 }
 
 export interface LangPairWithVariables<V = LangVariable> {
@@ -2638,9 +2629,6 @@ export interface LangPairWithVariables<V = LangVariable> {
     'limit3': V;
     'limit4': V;
     'limit5': V;
-  };
-  'CategoryGateConfirmChoice': {
-    'category': V;
   };
   'CompanyOtpSubtitle': {
     'phone': V;

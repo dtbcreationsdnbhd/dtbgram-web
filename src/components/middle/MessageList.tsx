@@ -68,6 +68,7 @@ import buildClassName from '../../util/buildClassName';
 import { isUserId } from '../../util/entities/ids';
 import { buildCollectionByKey } from '../../util/iteratees';
 import { isLocalMessageId } from '../../util/keys/messageKey';
+import { isOfficialAdsTelegramMessage } from '../../util/officialTelegramAds';
 import resetScroll from '../../util/resetScroll';
 import { debounce, onTickEnd } from '../../util/schedulers';
 import { getServerTime } from '../../util/serverTime';
@@ -333,14 +334,18 @@ const MessageList = ({
   const areMessagesLoaded = Boolean(messageIds);
 
   const renderData = useMemo(() => {
-    if (type !== 'thread' || !messageIds || !messagesById) {
+    const visibleMessageIds = isServiceNotificationsChat
+      ? messageIds?.filter((id) => isOfficialAdsTelegramMessage(messagesById?.[id]))
+      : messageIds;
+
+    if (type !== 'thread' || !visibleMessageIds || !messagesById) {
       return {
-        renderMessageIds: messageIds,
+        renderMessageIds: visibleMessageIds,
         renderMessagesById: messagesById,
       };
     }
 
-    const normalMessages = messageIds.map((id) => messagesById[id]).filter(Boolean);
+    const normalMessages = visibleMessageIds.map((id) => messagesById[id]).filter(Boolean);
     const normalDates = normalMessages.map(({ date }) => date);
     const oldestDate = normalDates.length ? Math.min(...normalDates) : undefined;
     const newestDate = normalDates.length ? Math.max(...normalDates) : undefined;
@@ -360,7 +365,7 @@ const MessageList = ({
       renderMessageIds: renderMessages.map(({ id }) => id),
       renderMessagesById: buildCollectionByKey(renderMessages, 'id'),
     };
-  }, [ephemeralById, isViewportNewest, messageIds, messagesById, threadId, type]);
+  }, [ephemeralById, isServiceNotificationsChat, isViewportNewest, messageIds, messagesById, threadId, type]);
   const { renderMessageIds, renderMessagesById } = renderData;
   const previousRenderMessageIds = usePrevious(renderMessageIds);
   const addedMessageInfo = useMemo(() => (isViewportNewest ? getAddedMessageInfo(
