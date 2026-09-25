@@ -1,0 +1,108 @@
+name: Pull Request Discord Notification
+
+on:
+  pull_request:
+    types: [opened, reopened]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Chaotic PR Alert
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # Standard GitHub Context
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_AVATAR: ${{ github.event.pull_request.user.avatar_url }}
+          PR_COMMITS: ${{ github.event.pull_request.commits }}
+          PR_FILES: ${{ github.event.pull_request.changed_files }}
+          PR_HEAD: ${{ github.event.pull_request.head.ref }}
+          PR_BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          # ---------------------------------------------------------
+          # 1. THE FLAVOR TEXT GENERATOR
+          # ---------------------------------------------------------
+          
+          # Random "Vibe" for the PR
+          VIBES=("Spaghetti Chef 🍝" "Bug Exterminator 🐛" "Chaos Agent 🧨" "Senior Engineer (Self-Proclaimed) 🎩" "StackOverflow Copy-Paster 📋" "YAML Whisperer 🗣️")
+          RANDOM_VIBE=${VIBES[$RANDOM % ${#VIBES[@]}]}
+
+          # Random "Threat Levels"
+          THREATS=("Low (Just a typo fix?)" "Moderate (Might break prod)" "High (Page the sysadmin)" "DEFCON 1 (Deploying on Friday)" "Existential Crisis")
+          RANDOM_THREAT=${THREATS[$RANDOM % ${#THREATS[@]}]}
+
+          # Random Colors (Hex converted to Decimal)
+          # Green(5763719), Red(15548997), Gold(16776960), Purple(10181046)
+          COLORS=(5763719 15548997 16776960 10181046)
+          RANDOM_COLOR=${COLORS[$RANDOM % ${#COLORS[@]}]}
+
+          # ---------------------------------------------------------
+          # 2. CONTENT PREP
+          # ---------------------------------------------------------
+
+          # Logic: If description is empty, roast the author. If not, truncate it.
+          if [ -z "$PR_BODY" ]; then
+            DESC_TEXT="*No description provided.* \n\n🕵️ **Suspect Code Detected:** The author refused to explain their actions. Proceed with extreme prejudice."
+          else
+            # Grab first 300 chars, escape quotes not needed here as jq handles it, just truncate
+            DESC_TEXT=$(echo "$PR_BODY" | head -c 300)
+            if [ ${#PR_BODY} -ge 300 ]; then DESC_TEXT="${DESC_TEXT}... (Read more on GitHub)"; fi
+          fi
+
+          # ---------------------------------------------------------
+          # 3. GIF ROTATION (The visual hook)
+          # ---------------------------------------------------------
+          GIFS=(
+            "https://media.giphy.com/media/dhXOQVR1pMJw04DkG3/giphy.gif"   # Coding fast
+            "https://media.giphy.com/media/TqiwHbFBaZ4ti/giphy.gif"        # Computer fire
+            "https://media.giphy.com/media/5Zesu5VPNGJlm/giphy.gif"        # Confused
+            "https://media.giphy.com/media/XiDyFVINpZ1wQ/giphy.gif"        # Boom
+            "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExdGN0dGRwcnYweHRjYzkwcmxrNDQ2d2NqZWl1eW1veTNhenUyNXNmNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l4FATJpd4LWgeruTK/giphy.gif"  # Sweating
+            "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExamZ2am9kd3cyanp6Y2RxNjNucWZoeHhxajB4eDdiemxidWt1cWxzOSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Njxl6gCPWVSoIYh9Ft/giphy.gif" # Under control
+            "https://media.giphy.com/media/3oKIPwoeGErMmaI43S/giphy.gif"  # Hacker
+          )
+          RANDOM_GIF=${GIFS[$RANDOM % ${#GIFS[@]}]}
+
+          # ---------------------------------------------------------
+          # 4. BUILD JSON & SEND
+          # ---------------------------------------------------------
+          
+          jq -n \
+            --arg author "$PR_AUTHOR" \
+            --arg avatar "$PR_AVATAR" \
+            --arg title "$PR_TITLE" \
+            --arg url "$PR_URL" \
+            --arg vibe "$RANDOM_VIBE" \
+            --arg threat "$RANDOM_THREAT" \
+            --arg commits "$PR_COMMITS" \
+            --arg files "$PR_FILES" \
+            --arg head "$PR_HEAD" \
+            --arg base "$PR_BASE" \
+            --arg desc "$DESC_TEXT" \
+            --arg gif "$RANDOM_GIF" \
+            --arg color "$RANDOM_COLOR" \
+            '{
+              username: "GitHub Dungeon Master",
+              avatar_url: "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+              content: ("📣 **New Quest Available!** The server is trembling..."),
+              embeds: [{
+                title: $title,
+                url: $url,
+                color: ($color | tonumber),
+                thumbnail: { url: $avatar },
+                author: { name: ($author + " has entered the arena!"), icon_url: $avatar },
+                description: ("> " + $desc + "\n\n━━━━━━━━━━━━━━━━━━━━━━"),
+                fields: [
+                  { name: "🎲 Class / Vibe", value: ("`" + $vibe + "`"), inline: true },
+                  { name: "☢️ Threat Level", value: ("`" + $threat + "`"), inline: true },
+                  { name: "🛤️ Trajectory", value: ("`" + $head + "` ➡️ `" + $base + "`"), inline: false },
+                  { name: "📊 Damage Report", value: ("🔨 **" + $commits + "** Commits | 📄 **" + $files + "** Files Changed"), inline: false }
+                ],
+                image: { url: $gif },
+                footer: { text: "Merge at your own risk. 🎲" },
+                timestamp: (now | strftime("%Y-%m-%dT%H:%M:%SZ"))
+              }]
+            }' | curl -H "Content-Type: application/json" -d @- "$DISCORD_WEBHOOK"

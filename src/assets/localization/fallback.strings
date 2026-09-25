@@ -189,6 +189,17 @@
 "CompanyOtpWrongCode" = "Invalid company code. Please try again.";
 "CompanyOtpNetworkError" = "Could not verify the code. Check your connection and try again.";
 "PlatformTwoFaSyncError" = "Could not sync two-step password. Check your connection.";
+"CategoryGateTitle" = "Select your category";
+"CategoryGateDescription" = "Choose your category to continue.";
+"CategoryGatePlaceholder" = "Select a category";
+"CategoryGateConfirm" = "Confirm";
+"CategoryGateConfirmTitle" = "Confirm your category";
+"CategoryGateConfirmChoice" = "You selected {category}.";
+"CategoryGateConfirmWarning" = "If you selected the wrong category, contact an admin to update it.";
+"CategoryGateSubmit" = "Confirm";
+"CategoryGateRetry" = "Retry";
+"CategoryGateLoadError" = "Could not load categories. Check your connection and try again.";
+"CategoryGateSaveError" = "Could not save your category. Check your connection and try again.";
 "Code" = "Code";
 "Open" = "Open";
 "LoginHeaderPassword" = "Enter Password";
@@ -3364,3 +3375,4 @@
 "ChatClearHistory" = "Clear History";
 "ChatClearHistoryConfirm" = "Delete all messages in this chat? The chat will stay in your chat list.";
 "HeaderMenuViewChannelInfo" = "View channel info";
+"JustChat" = "JustChat";
