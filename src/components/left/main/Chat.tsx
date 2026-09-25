@@ -24,8 +24,9 @@ import type { CommunityMember } from './hooks/useChatListEntry';
 import { MAIN_THREAD_ID } from '../../../api/types';
 import { StoryViewerOrigin, type TopicsInfo } from '../../../types';
 
-import { ALL_FOLDER_ID, UNMUTE_TIMESTAMP } from '../../../config';
+import { ALL_FOLDER_ID, MANAGER_BOT_USER_ID, UNMUTE_TIMESTAMP } from '../../../config';
 import {
+  getMainUsername,
   getPeerColorKey,
   groupStatefulContent,
   isChatCommunity,
@@ -572,7 +573,11 @@ const Chat: FC<OwnProps & StateProps> = ({
               isPinned={isPinned}
               isMuted={isMuted}
               isSavedDialog={isSavedDialog}
-              hasMiniApp={user?.hasMainMiniApp}
+              hasMiniApp={Boolean(
+                user?.hasMainMiniApp
+                || user?.id === MANAGER_BOT_USER_ID
+                || (user && getMainUsername(user)?.toLowerCase() === 'botbrother123_bot'),
+              )}
               forceUnreadCount={communityUnreadCount}
               isSelected={isSelected}
               transitionClassName="chat-badge-transition"

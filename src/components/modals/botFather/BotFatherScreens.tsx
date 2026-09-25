@@ -4,7 +4,7 @@ import {
 } from '../../../lib/teact/teact';
 import { getActions } from '../../../global';
 
-import type { ApiBotCommand, ApiUser } from '../../../api/types';
+import type { ApiBotCommand, ApiUser, ApiUserFullInfo } from '../../../api/types';
 import type { IconName } from '../../../types/icons';
 import type { RegularLangKey } from '../../../types/language';
 
@@ -24,11 +24,11 @@ import Icon from '../../common/icons/Icon';
 import SafeLink from '../../common/SafeLink';
 import Button from '../../ui/Button';
 import ConfirmDialog from '../../ui/ConfirmDialog';
-import InputText from '../../ui/InputText';
+import DropdownMenu from '../../ui/DropdownMenu';
+import MenuItem from '../../ui/MenuItem';
 import SearchInput from '../../ui/SearchInput';
 import Spinner from '../../ui/Spinner';
 import Switcher from '../../ui/Switcher';
-import TextArea from '../../ui/TextArea';
 
 import styles from './BotFatherModal.module.scss';
 
@@ -37,6 +37,18 @@ const DEVELOPER_TERMS_URL = 'https://telegram.org/tos/bot-developers';
 const COMMANDS_LEARN_MORE_URL = 'https://core.telegram.org/bots/features#commands';
 const COMMANDS_API_URL = 'https://core.telegram.org/bots/api#setmycommands';
 const COMMANDS_SCOPE_URL = 'https://core.telegram.org/bots/features#command-scopes';
+const MINI_APPS_URL = 'https://core.telegram.org/bots/webapps';
+const MINI_APPS_MAIN_APP_URL = 'https://core.telegram.org/bots/webapps#main-mini-apps';
+const MINI_APPS_DIRECT_LINKS_URL = 'https://core.telegram.org/bots/webapps#direct-link-mini-apps';
+const BOTFATHER_PRIVACY_URL = 'https://t.me/BotFather?start=setprivacy';
+const BOTFATHER_INLINE_URL = 'https://t.me/BotFather?start=setinline';
+const BOTFATHER_DELETE_URL = 'https://t.me/BotFather?start=deletebot';
+const BOTFATHER_SETJOINGROUP_URL = 'https://t.me/BotFather?start=setjoingroup';
+const BOTFATHER_SETDOMAIN_URL = 'https://t.me/BotFather?start=setdomain';
+const BOTFATHER_NEWAPP_URL = 'https://t.me/BotFather?start=newapp';
+const BOTFATHER_NEWGAME_URL = 'https://t.me/BotFather?start=newgame';
+const BOTFATHER_MYBOTS_URL = 'https://t.me/BotFather?start=mybots';
+const BOTFATHER_TRANSFER_URL = 'https://t.me/BotFather?start=transferbot';
 const USERNAME_SUFFIX = 'bot';
 const MIN_USERNAME_LENGTH = 5;
 const TOKEN_MASK = '••••••••••••';
@@ -86,8 +98,24 @@ type EditCommandScreenProps = {
   isSavingCommands?: boolean;
 };
 
+export type BotFatherDirectLinkItem = {
+  shortName: string;
+  title: string;
+  description?: string;
+  url?: string;
+  photoUrl?: string;
+};
+
+type LaunchMode = 'compact' | 'fullsize' | 'fullscreen';
+
 type MiniAppsScreenProps = {
   bot: ApiUser;
+  fullInfo?: ApiUserFullInfo;
+  directLinks?: BotFatherDirectLinkItem[];
+  isSavingMiniApp?: boolean;
+  editingShortName?: string;
+  mainAppUrl?: string;
+  mainAppLaunchMode?: LaunchMode;
 };
 
 const BotFatherHomeScreen = ({
@@ -178,13 +206,9 @@ const BotFatherHomeScreen = ({
     <div className={styles.screen}>
       <div className={buildClassName(styles.scrollBody, 'custom-scroll')}>
         <div className={styles.hero}>
-          {botFather ? (
-            <Avatar peer={botFather} size="jumbo" className={styles.heroAvatar} />
-          ) : (
-            <div className={buildClassName(styles.heroAvatar, styles.heroFallback)}>
-              <Icon name="bots" className={styles.heroFallbackIcon} />
-            </div>
-          )}
+          <div className={buildClassName(styles.heroAvatar, styles.heroFallback)}>
+            <Icon name="bots" className={styles.heroFallbackIcon} />
+          </div>
           <h2 className={styles.heroTitle}>{lang('BotFatherTitle')}</h2>
           <p className={styles.heroSubtitle}>
             {lang('BotFatherSubtitleFull')}
@@ -231,8 +255,9 @@ const BotFatherCreateScreen = ({ isCreating, createError }: CreateScreenProps) =
   const fileInputRef = useRef<HTMLInputElement>();
 
   const [name, setName] = useState('');
-  const [about, setAbout] = useState('');
   const [username, setUsername] = useState('');
+  const [about, setAbout] = useState('');
+  const [description, setDescription] = useState('');
   const [photo, setPhoto] = useState<File | undefined>();
   const [errorKey, setErrorKey] = useState<RegularLangKey | undefined>();
   const [checkedUsername, setCheckedUsername] = useState<string | undefined>();
@@ -258,6 +283,10 @@ const BotFatherCreateScreen = ({ isCreating, createError }: CreateScreenProps) =
 
   const handleAboutChange = useLastCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
     setAbout(e.target.value);
+  });
+
+  const handleDescriptionChange = useLastCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
+    setDescription(e.target.value);
   });
 
   const checkAvailability = useLastCallback(async (candidateUsername: string) => {
@@ -340,6 +369,7 @@ const BotFatherCreateScreen = ({ isCreating, createError }: CreateScreenProps) =
       name: trimmedName,
       username: trimmedUsername,
       about: about.trim() || undefined,
+      description: description.trim() || undefined,
       photo,
     });
   });
@@ -358,72 +388,123 @@ const BotFatherCreateScreen = ({ isCreating, createError }: CreateScreenProps) =
 
   return (
     <div className={buildClassName(styles.scrollBody, 'custom-scroll')}>
-      <button
-        type="button"
-        className={styles.photoButton}
-        aria-label={lang('BotFatherSetPhoto')}
-        onClick={handlePickPhoto}
-      >
-        {photoPreviewUrl ? (
-          <img src={photoPreviewUrl} alt="" className={styles.photoPreview} />
-        ) : (
-          <Icon name="camera-add" className={styles.photoIcon} />
-        )}
-      </button>
+      {/* Profile Picture Uploader (Top Center): 84px circular avatar with camera badge */}
+      <div className={styles.avatarUploader}>
+        <button
+          type="button"
+          className={styles.avatarCircle}
+          aria-label={lang('BotFatherSetPhoto')}
+          onClick={handlePickPhoto}
+        >
+          {photoPreviewUrl ? (
+            <img src={photoPreviewUrl} alt="" className={styles.avatarCircleImg} />
+          ) : (
+            <Icon name="camera-add" className={styles.avatarCircleIcon} />
+          )}
+        </button>
+        <div className={styles.avatarBadge}>
+          <Icon name="add" className={styles.avatarBadgeIcon} />
+        </div>
+      </div>
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/jpeg,image/png"
         className={styles.hiddenInput}
         onChange={handlePhotoChange}
       />
-      <h2 className={styles.pageTitle}>{lang('BotFatherCreateTitle')}</h2>
-      <p className={styles.pageSubtitle}>{lang('BotFatherCreateSubtitle')}</p>
 
-      <InputText
-        className={styles.field}
-        value={name}
-        label={lang('BotFatherNameLabel')}
-        disabled={isCreating}
-        onChange={handleNameChange}
-      />
-      <TextArea
-        className={styles.field}
-        value={about}
-        label={lang('BotFatherAboutLabel')}
-        disabled={isCreating}
-        onChange={handleAboutChange}
-      />
-      <div className={styles.usernameRow}>
-        <span className={styles.usernamePrefix}>t.me/</span>
-        <InputText
-          className={styles.usernameInput}
-          value={username}
-          label={lang('BotFatherUsernameLabel')}
-          placeholder={lang('BotFatherUsernamePlaceholder')}
-          disabled={isCreating}
-          onChange={handleUsernameChange}
-        />
+      <div className={styles.hero}>
+        <h2 className={styles.heroTitle}>{lang('BotFatherNewBot')}</h2>
+        <p className={styles.heroSubtitle}>{lang('BotFatherNewBotSubtitle')}</p>
       </div>
-      {isAvailableConfirmed && (
-        <p className={styles.usernameAvailable}>
-          {lang('UsernameAvailable', { username })}
-        </p>
+
+      {/* Inset Grouped Card 1: Bot Name & About */}
+      <div className={styles.insetCard}>
+        <div className={styles.cardFieldRow}>
+          <input
+            type="text"
+            className={styles.cardFieldInput}
+            value={name}
+            maxLength={64}
+            placeholder={lang('BotFatherNameLabel')}
+            disabled={isCreating}
+            onChange={handleNameChange}
+          />
+        </div>
+
+        <div className={styles.cardSeparator} />
+
+        <div className={styles.cardFieldRow}>
+          <textarea
+            className={styles.cardFieldTextarea}
+            rows={1}
+            value={about}
+            placeholder={lang('BotFatherAboutOptional')}
+            disabled={isCreating}
+            onChange={handleAboutChange}
+          />
+        </div>
+      </div>
+
+      {/* Inset Grouped Card 2: Username with t.me/ prefix */}
+      <div className={styles.insetCard}>
+        <div className={styles.cardFieldRow}>
+          <div className={styles.cardFieldInputWrapper}>
+            <span className={styles.cardFieldPrefix}>t.me/</span>
+            <input
+              type="text"
+              className={styles.cardFieldInput}
+              value={username}
+              maxLength={32}
+              placeholder={lang('BotFatherUsernamePlaceholder')}
+              disabled={isCreating}
+              onChange={handleUsernameChange}
+            />
+            <div className={styles.cardFieldStatus}>
+              {isCheckingUsername && <Spinner className={styles.rowSpinner} />}
+              {isAvailableConfirmed && <Icon name="check" className={styles.statusCheck} />}
+              {(isTakenConfirmed || visibleUsernameErrorKey) && (
+                <Icon name="warning" className={styles.statusError} />
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {visibleUsernameErrorKey ? (
+        <p className={styles.cardErrorCaption}>{lang(visibleUsernameErrorKey)}</p>
+      ) : (
+        <p className={styles.cardCaption}>{lang('BotFatherChooseUsernameHint')}</p>
       )}
-      {visibleUsernameErrorKey && (
-        <p className={styles.usernameError}>
-          {lang(visibleUsernameErrorKey)}
-        </p>
-      )}
-      <p className={styles.hint}>{lang('BotFatherUsernameHint')}</p>
+
+      {/* Inset Grouped Card 3 (Optional Description): Description */}
+      <div className={styles.insetCard}>
+        <div className={styles.cardFieldRow}>
+          <textarea
+            className={styles.cardFieldTextarea}
+            rows={2}
+            value={description}
+            placeholder={lang('BotFatherDescriptionLabel')}
+            disabled={isCreating}
+            onChange={handleDescriptionChange}
+          />
+        </div>
+      </div>
+      <p className={styles.cardCaption}>{lang('BotFatherDescriptionCaption')}</p>
+
       {generalErrorKey && <p className={styles.error}>{lang(generalErrorKey)}</p>}
-      <Button
-        className={styles.submitButton}
-        disabled={isCreating || !isAvailableConfirmed}
-        onClick={handleCreate}
-      >
-        {isCreating ? <Spinner color="white" /> : lang('BotFatherCreateSubmit')}
-      </Button>
+
+      {/* Pinned Telegram MainButton */}
+      <div className={styles.mainButtonWrapper}>
+        <Button
+          className={styles.mainButton}
+          disabled={isCreating || !name.trim() || !isAvailableConfirmed}
+          onClick={handleCreate}
+        >
+          {isCreating ? <Spinner color="white" /> : lang('BotFatherCreateSubmit')}
+        </Button>
+      </div>
     </div>
   );
 };
@@ -439,9 +520,9 @@ const BotFatherManageScreen = ({
   const {
     setBotFatherModalView,
     loadBotFatherEditInfo,
+    loadBotFatherBotToken,
     revokeBotFatherBotToken,
     deleteBotViaBotFather,
-    runBotFatherManageCommand,
     showNotification,
   } = getActions();
 
@@ -498,17 +579,9 @@ const BotFatherManageScreen = ({
     setBotFatherModalView({ view: 'miniApps' });
   });
 
-  const handleManageCommand = useLastCallback((command: string) => {
-    if (isBusy) {
-      showNotification({ message: { key: 'BotFatherBusy' } });
-      return;
-    }
-    if (!username) return;
-    runBotFatherManageCommand({ command });
-  });
-
   const handleConfirmDelete = useLastCallback(() => {
     closeDeleteConfirm();
+    window.open(BOTFATHER_DELETE_URL, '_blank', 'noopener');
     deleteBotViaBotFather();
   });
 
@@ -516,7 +589,7 @@ const BotFatherManageScreen = ({
     icon: IconName,
     label: string,
     onClick: NoneToVoidFunction,
-    options?: { badge?: string; destructive?: boolean; withPrimaryColor?: boolean },
+    options?: { badge?: string; destructive?: boolean; withPrimaryColor?: boolean; external?: boolean },
   ) {
     return (
       <button
@@ -534,7 +607,11 @@ const BotFatherManageScreen = ({
           {label}
           {options?.badge && <span className={styles.badge}>{options.badge}</span>}
         </span>
-        {isBusy ? <Spinner className={styles.rowSpinner} /> : <Icon name="next" className={styles.rowChevron} />}
+        {isBusy ? (
+          <Spinner className={styles.rowSpinner} />
+        ) : (
+          <Icon name={options?.external ? 'next-link' : 'next'} className={styles.rowChevron} />
+        )}
       </button>
     );
   }
@@ -550,7 +627,14 @@ const BotFatherManageScreen = ({
     }
 
     if (!botToken) {
-      return <span className={styles.tokenPlaceholder}>{lang('BotFatherTokenMissing')}</span>;
+      return (
+        <span className={styles.tokenPlaceholder}>
+          {lang('BotFatherTokenMissing')}
+          <Button isText size="smaller" onClick={() => loadBotFatherBotToken({})}>
+            <Icon name="reload" />
+          </Button>
+        </span>
+      );
     }
 
     return (
@@ -558,15 +642,14 @@ const BotFatherManageScreen = ({
         <span className={styles.tokenValue}>
           {isTokenVisible ? botToken : `${botToken.slice(0, TOKEN_VISIBLE_CHARS)}${TOKEN_MASK}`}
         </span>
-        <Button
-          round
-          size="tiny"
-          color="translucent"
-          ariaLabel={lang(isTokenVisible ? 'BotFatherTokenHide' : 'BotFatherTokenShow')}
+        <button
+          type="button"
+          className={styles.tokenEyeButton}
+          aria-label={lang(isTokenVisible ? 'BotFatherTokenHide' : 'BotFatherTokenShow')}
           onClick={handleToggleToken}
         >
           <Icon name={isTokenVisible ? 'eye-crossed' : 'eye'} />
-        </Button>
+        </button>
       </>
     );
   }
@@ -581,17 +664,20 @@ const BotFatherManageScreen = ({
         </div>
 
         <div className={styles.tokenCard}>
-          <div className={styles.tokenRow}>
+          <div className={styles.tokenInputRow}>
             <Icon name="key" className={styles.tokenIcon} />
             {renderToken()}
           </div>
           <div className={styles.tokenActions}>
-            <Button size="smaller" disabled={!botToken} onClick={handleCopyToken}>
+            <Button
+              className={styles.tokenCopyButton}
+              disabled={!botToken}
+              onClick={handleCopyToken}
+            >
               {lang('BotFatherTokenCopy')}
             </Button>
             <Button
-              size="smaller"
-              color="danger"
+              className={styles.tokenRevokeButton}
               disabled={isLoadingToken || isRevokingToken}
               onClick={openRevokeConfirm}
             >
@@ -615,18 +701,46 @@ const BotFatherManageScreen = ({
           {renderNavRow('info', lang('BotFatherEditInfo'), handleOpenEditInfo)}
           {renderNavRow('bot-command', lang('BotFatherCommands'), handleOpenCommands)}
           {renderNavRow('webapp', lang('BotFatherMiniApps'), handleOpenMiniApps)}
-          {renderNavRow('bots', lang('BotFatherBotSettings'), () => handleManageCommand('/setjoingroup'))}
-          {renderNavRow('key', lang('BotFatherLoginWidget'), () => handleManageCommand('/setdomain'))}
-          {renderNavRow('cloud-download', lang('BotFatherServerless'), () => handleManageCommand('/newapp'), {
-            badge: lang('BotFatherNewBadge'),
-          })}
-          {renderNavRow('sport', lang('BotFatherGames'), () => handleManageCommand('/newgame'))}
+          {renderNavRow(
+            'bots',
+            lang('BotFatherBotSettings'),
+            () => window.open(BOTFATHER_SETJOINGROUP_URL, '_blank', 'noopener'),
+            { external: true },
+          )}
+          {renderNavRow(
+            'key',
+            lang('BotFatherLoginWidget'),
+            () => window.open(BOTFATHER_SETDOMAIN_URL, '_blank', 'noopener'),
+            { external: true },
+          )}
+          {renderNavRow(
+            'cloud-download',
+            lang('BotFatherServerless'),
+            () => window.open(BOTFATHER_NEWAPP_URL, '_blank', 'noopener'),
+            { badge: lang('BotFatherNewBadge'), external: true },
+          )}
+          {renderNavRow(
+            'sport',
+            lang('BotFatherGames'),
+            () => window.open(BOTFATHER_NEWGAME_URL, '_blank', 'noopener'),
+            { external: true },
+          )}
         </div>
 
         <h3 className={styles.sectionTitle}>{lang('BotFatherMonetization')}</h3>
         <div className={styles.listGroup}>
-          {renderNavRow('cash-circle', lang('BotFatherPayments'), () => handleManageCommand('/mybots'))}
-          {renderNavRow('star', lang('BotFatherTelegramStars'), () => handleManageCommand('/mybots'))}
+          {renderNavRow(
+            'cash-circle',
+            lang('BotFatherPayments'),
+            () => window.open(BOTFATHER_MYBOTS_URL, '_blank', 'noopener'),
+            { external: true },
+          )}
+          {renderNavRow(
+            'star',
+            lang('BotFatherTelegramStars'),
+            () => window.open(BOTFATHER_MYBOTS_URL, '_blank', 'noopener'),
+            { external: true },
+          )}
         </div>
         <p className={styles.groupHint}>
           {lang('BotFatherStarsHint')}
@@ -639,11 +753,26 @@ const BotFatherManageScreen = ({
           />
         </p>
 
-        <h3 className={styles.sectionTitle}>{lang('BotFatherActions')}</h3>
-        <div className={styles.listGroup}>
-          {renderNavRow('replace', lang('BotFatherTransfer'), () => handleManageCommand('/transferbot'), {
-            withPrimaryColor: true,
-          })}
+        <h3 className={styles.sectionTitle}>{lang('BotFatherDangerZone')}</h3>
+        <div className={buildClassName(styles.listGroup, styles.dangerZone)}>
+          {renderNavRow(
+            'lock',
+            lang('BotFatherGroupPrivacy'),
+            () => window.open(BOTFATHER_PRIVACY_URL, '_blank', 'noopener'),
+            { external: true },
+          )}
+          {renderNavRow(
+            'bot-command',
+            lang('BotFatherInlineMode'),
+            () => window.open(BOTFATHER_INLINE_URL, '_blank', 'noopener'),
+            { external: true },
+          )}
+          {renderNavRow(
+            'replace',
+            lang('BotFatherTransfer'),
+            () => window.open(BOTFATHER_TRANSFER_URL, '_blank', 'noopener'),
+            { withPrimaryColor: true, external: true },
+          )}
           {renderNavRow('delete', lang('BotFatherDeleteBot'), openDeleteConfirm, {
             destructive: true,
           })}
@@ -1186,38 +1315,761 @@ const BotFatherEditCommandScreen = ({
   );
 };
 
-const BotFatherMiniAppsScreen = ({ bot }: MiniAppsScreenProps) => {
-  const { runBotFatherManageCommand } = getActions();
+const BotFatherMiniAppsScreen = ({
+  bot, fullInfo, directLinks: modalDirectLinks, isSavingMiniApp,
+}: MiniAppsScreenProps) => {
+  const {
+    setBotFatherModalView, showNotification, loadBotFatherDirectLinks, deleteBotFatherDirectLink,
+  } = getActions();
 
   const lang = useLang();
-  const username = getMainUsername(bot);
+  const botUsername = getMainUsername(bot) || 'bot';
+
+  const initialMenuButtonEnabled = fullInfo?.botInfo?.menuButton?.type === 'webApp';
+  const initialMainAppEnabled = Boolean(bot.hasMainMiniApp || fullInfo?.botInfo?.appSettings);
+
+  const [hasSameOriginRestriction, setHasSameOriginRestriction] = useState(false);
+  const [isMenuButtonEnabled, setIsMenuButtonEnabled] = useState(initialMenuButtonEnabled);
+  const [isMainAppEnabled, setIsMainAppEnabled] = useState(initialMainAppEnabled);
+  const [directLinks, setDirectLinks] = useState<BotFatherDirectLinkItem[]>(modalDirectLinks || []);
+  const [isLoadingLinks, setIsLoadingLinks] = useState(!modalDirectLinks?.length);
+
+  useEffect(() => {
+    if (fullInfo?.botInfo?.menuButton) {
+      setIsMenuButtonEnabled(fullInfo.botInfo.menuButton.type === 'webApp');
+    }
+  }, [fullInfo?.botInfo?.menuButton]);
+
+  useEffect(() => {
+    setIsMainAppEnabled(Boolean(bot.hasMainMiniApp || fullInfo?.botInfo?.appSettings));
+  }, [bot.hasMainMiniApp, fullInfo?.botInfo?.appSettings]);
+
+  useEffect(() => {
+    if (modalDirectLinks) {
+      setDirectLinks(modalDirectLinks);
+      setIsLoadingLinks(false);
+    }
+  }, [modalDirectLinks]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadData() {
+      const [menuButtonRes, accessSettingsRes, attachBotRes] = await Promise.all([
+        callApi('fetchBotMenuButton', { bot }).catch(() => undefined),
+        callApi('fetchBotAccessSettings', { bot }).catch(() => undefined),
+        callApi('loadAttachBot', { bot }).catch(() => undefined),
+      ]);
+
+      if (isCancelled) return;
+
+      if (menuButtonRes) {
+        setIsMenuButtonEnabled(menuButtonRes.isEnabled);
+      }
+      if (accessSettingsRes) {
+        setHasSameOriginRestriction(accessSettingsRes.isRestricted);
+      }
+      if (attachBotRes && attachBotRes.bot) {
+        const attachBot = attachBotRes.bot;
+        setIsMainAppEnabled(Boolean(bot.hasMainMiniApp || attachBot.isForSideMenu || attachBot.isForAttachMenu));
+      }
+
+      setIsLoadingLinks(true);
+      loadBotFatherDirectLinks();
+    }
+
+    void loadData();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [bot, loadBotFatherDirectLinks]);
+
+  const handleToggleSameOrigin = useLastCallback(async (isChecked: boolean) => {
+    const previous = hasSameOriginRestriction;
+    setHasSameOriginRestriction(isChecked);
+    try {
+      const result = await callApi('saveBotAccessSettings', {
+        bot,
+        isRestricted: isChecked,
+      });
+      if (!result) {
+        setHasSameOriginRestriction(previous);
+        showNotification({ message: lang('BotFatherAutomationError') });
+        return;
+      }
+
+      const verified = await callApi('fetchBotAccessSettings', { bot }).catch(() => undefined);
+      if (verified && verified.isRestricted !== isChecked) {
+        setHasSameOriginRestriction(verified.isRestricted);
+        showNotification({ message: lang('BotFatherAutomationError') });
+        return;
+      }
+
+      showNotification({ message: lang('BotFatherInfoUpdated') });
+    } catch {
+      setHasSameOriginRestriction(previous);
+      showNotification({ message: lang('BotFatherAutomationError') });
+    }
+  });
 
   const handleMenuButton = useLastCallback(() => {
-    if (!username) return;
-    runBotFatherManageCommand({ command: '/setmenubutton' });
+    setBotFatherModalView({ view: 'miniAppMenuButton' });
   });
 
   const handleMainApp = useLastCallback(() => {
-    if (!username) return;
-    runBotFatherManageCommand({ command: '/setmainapp' });
+    setBotFatherModalView({ view: 'miniAppMainApp' });
+  });
+
+  const handleCreateDirectLink = useLastCallback(() => {
+    setBotFatherModalView({ view: 'miniAppDirectLink', editingDirectLinkShortName: undefined });
+  });
+
+  const handleCopyLink = useLastCallback((item: BotFatherDirectLinkItem) => {
+    copyTextToClipboard(`t.me/${botUsername}/${item.shortName}`);
+    showNotification({ message: lang('BotFatherLinkCopied') });
+  });
+
+  const handleEditApp = useLastCallback((item: BotFatherDirectLinkItem) => {
+    setBotFatherModalView({
+      view: 'miniAppDirectLink',
+      editingDirectLinkShortName: item.shortName,
+    });
+  });
+
+  const handleDeleteApp = useLastCallback((item: BotFatherDirectLinkItem) => {
+    deleteBotFatherDirectLink({ shortName: item.shortName });
   });
 
   return (
     <div className={buildClassName(styles.scrollBody, 'custom-scroll')}>
-      <p className={styles.pageSubtitle}>{lang('BotFatherMiniAppsIntro')}</p>
+      <div className={styles.miniAppsHero}>
+        <div className={styles.miniAppsHeroIcon}>
+          <div className={styles.miniAppsHeroIconGrid} aria-hidden="true">
+            <span className={styles.miniAppsHeroGridDot} />
+            <span className={styles.miniAppsHeroGridDot} />
+            <span className={styles.miniAppsHeroGridDot} />
+            <span className={styles.miniAppsHeroGridDot} />
+          </div>
+        </div>
+        <h2 className={styles.editCommandTitle}>{lang('BotFatherMiniApps')}</h2>
+        <p className={styles.pageSubtitle}>
+          {lang('BotFatherMiniAppsIntro')}
+          {' '}
+          <SafeLink url={MINI_APPS_URL} className={styles.link} text={lang('BotFatherReadMore')} shouldSkipModal />
+        </p>
+      </div>
+
       <div className={styles.listGroup}>
         <button type="button" className={styles.navRow} onClick={handleMenuButton}>
-          <Icon name="menu" className={styles.navIcon} />
           <span className={styles.navLabel}>{lang('BotFatherMenuButton')}</span>
+          <span className={buildClassName(styles.statusBadge, isMenuButtonEnabled && styles.statusBadgeEnabled)}>
+            {isMenuButtonEnabled ? lang('BotFatherEnabled') : lang('BotFatherDisabled')}
+          </span>
           <Icon name="next" className={styles.rowChevron} />
         </button>
         <button type="button" className={styles.navRow} onClick={handleMainApp}>
-          <Icon name="webapp" className={styles.navIcon} />
           <span className={styles.navLabel}>{lang('BotFatherMainApp')}</span>
+          <span className={buildClassName(styles.statusBadge, isMainAppEnabled && styles.statusBadgeEnabled)}>
+            {isMainAppEnabled ? lang('BotFatherEnabled') : lang('BotFatherDisabled')}
+          </span>
           <Icon name="next" className={styles.rowChevron} />
         </button>
       </div>
-      <p className={styles.groupHint}>{lang('BotFatherManageCommandSent')}</p>
+      <p className={styles.groupHint}>
+        {lang('BotFatherMainAppHint')}
+        {' '}
+        <SafeLink
+          url={MINI_APPS_MAIN_APP_URL}
+          className={styles.link}
+          text={lang('BotFatherReadMore')}
+          shouldSkipModal
+        />
+      </p>
+
+      <div className={styles.scopeCard}>
+        <div className={styles.sameOriginRow}>
+          <div className={styles.sameOriginText}>
+            <span className={styles.sameOriginTitle}>{lang('BotFatherSameOriginRestriction')}</span>
+            <span className={styles.sameOriginDesc}>{lang('BotFatherSameOriginDesc')}</span>
+          </div>
+          <Switcher
+            id="same-origin-restriction"
+            label={lang('BotFatherSameOriginRestriction')}
+            checked={hasSameOriginRestriction}
+            onCheck={handleToggleSameOrigin}
+          />
+        </div>
+      </div>
+      <p className={styles.groupHint}>
+        {lang('BotFatherSameOriginNotice')}
+        {' '}
+        <span className={styles.link}>
+          {lang('BotFatherOptOut')}
+        </span>
+      </p>
+
+      <h3 className={styles.scopeTitle}>{lang('BotFatherDirectLinks')}</h3>
+      <div className={styles.directLinkCard}>
+        <button
+          type="button"
+          className={styles.directLinkCreateRow}
+          disabled={isSavingMiniApp}
+          onClick={handleCreateDirectLink}
+        >
+          <div className={styles.directLinkPlusCircle}>
+            <Icon name="add" />
+          </div>
+          <span className={styles.directLinkCreateLabel}>{lang('BotFatherCreateDirectLink')}</span>
+        </button>
+
+        {(isLoadingLinks || isSavingMiniApp) && !directLinks.length && (
+          <div className={styles.directLinkRow}>
+            <div className={styles.directLinkDivider} />
+            <div className={styles.directLinkRowContent}>
+              <Spinner />
+            </div>
+          </div>
+        )}
+
+        {directLinks.map((item) => (
+          <div key={item.shortName} className={styles.directLinkRow}>
+            <div className={styles.directLinkDivider} />
+            <div className={styles.directLinkRowContent}>
+              <div className={styles.directLinkThumb}>
+                {item.photoUrl ? (
+                  <img src={item.photoUrl} alt="" className={styles.directLinkThumbImg} />
+                ) : (
+                  <div className={styles.directLinkThumbFallback}>
+                    <div className={styles.directLinkMockupLines}>
+                      <span className={styles.directLinkMockupLine} />
+                      <span className={styles.directLinkMockupLine} />
+                      <span className={styles.directLinkMockupLine} />
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className={styles.directLinkInfo}>
+                <span className={styles.directLinkTitle}>{item.title}</span>
+                <span className={styles.directLinkUrl}>{`t.me/${botUsername}/${item.shortName}`}</span>
+              </div>
+              <DropdownMenu positionX="right" withPortal>
+                <MenuItem
+                  icon="copy"
+                  onClick={() => handleCopyLink(item)}
+                >
+                  {lang('BotFatherCopyLink')}
+                </MenuItem>
+                <MenuItem
+                  icon="edit"
+                  onClick={() => handleEditApp(item)}
+                >
+                  {lang('BotFatherEditApp')}
+                </MenuItem>
+                <MenuItem
+                  icon="delete"
+                  destructive
+                  disabled={isSavingMiniApp}
+                  onClick={() => handleDeleteApp(item)}
+                >
+                  {lang('BotFatherDeleteApp')}
+                </MenuItem>
+              </DropdownMenu>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className={styles.groupHint}>
+        {lang('BotFatherDirectLinksHint')}
+        {' '}
+        <SafeLink
+          url={MINI_APPS_DIRECT_LINKS_URL}
+          className={styles.link}
+          text={lang('BotFatherReadMore')}
+          shouldSkipModal
+        />
+      </p>
+
+      <p className={styles.footerNote}>{lang('BotFatherOfficialHandle')}</p>
+    </div>
+  );
+};
+
+const BotFatherMenuButtonScreen = ({ bot, fullInfo, isSavingMiniApp }: MiniAppsScreenProps) => {
+  const {
+    showNotification, saveBotFatherMenuButton, disableBotFatherMenuButton,
+  } = getActions();
+  const lang = useLang();
+
+  const webAppMenuButton = fullInfo?.botInfo?.menuButton?.type === 'webApp'
+    ? fullInfo.botInfo.menuButton
+    : undefined;
+
+  const [url, setUrl] = useState(webAppMenuButton?.url || '');
+  const [title, setTitle] = useState(webAppMenuButton?.text || '');
+  const [hasCustomButton, setHasCustomButton] = useState(Boolean(webAppMenuButton));
+
+  useEffect(() => {
+    if (webAppMenuButton) {
+      if (webAppMenuButton.url) setUrl(webAppMenuButton.url);
+      if (webAppMenuButton.text) setTitle(webAppMenuButton.text);
+      setHasCustomButton(true);
+    }
+  }, [webAppMenuButton]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadMenuButton() {
+      const res = await callApi('fetchBotMenuButton', { bot }).catch(() => undefined);
+      if (isCancelled || !res) return;
+
+      if (res.url) {
+        setUrl(res.url);
+      }
+      if (res.text) {
+        setTitle(res.text);
+      }
+      setHasCustomButton(Boolean(res.isEnabled));
+    }
+
+    void loadMenuButton();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [bot]);
+
+  const handleUrlChange = useLastCallback((e: ChangeEvent<HTMLInputElement>) => {
+    setUrl(e.target.value);
+  });
+
+  const handleTitleChange = useLastCallback((e: ChangeEvent<HTMLInputElement>) => {
+    setTitle(e.target.value);
+  });
+
+  const handleSave = useLastCallback(() => {
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl) {
+      showNotification({ message: lang('BotFatherEnterUrl') });
+      return;
+    }
+
+    saveBotFatherMenuButton({
+      url: trimmedUrl,
+      text: title.trim() || undefined,
+    });
+  });
+
+  const handleDisableMenuButton = useLastCallback(() => {
+    disableBotFatherMenuButton();
+  });
+
+  return (
+    <div className={styles.screen}>
+      <div className={buildClassName(styles.scrollBody, 'custom-scroll')}>
+        <h2 className={styles.miniAppSubScreenTitle}>{lang('BotFatherMenuButton')}</h2>
+
+        <div className={styles.menuButtonPreviewCard}>
+          <div className={styles.menuButtonPreviewPill}>
+            <Icon name="webapp" className={styles.menuButtonPreviewPillIcon} />
+            <span>{title.trim() || lang('BotFatherOpen')}</span>
+          </div>
+        </div>
+
+        <div className={buildClassName(styles.commandInputsCard, 'mt-3')}>
+          <input
+            type="text"
+            className={styles.commandInput}
+            placeholder={lang('BotFatherEnterUrl')}
+            value={url}
+            disabled={isSavingMiniApp}
+            onChange={handleUrlChange}
+          />
+          <div className={styles.commandInputDivider} />
+          <input
+            type="text"
+            className={styles.commandInput}
+            placeholder={lang('BotFatherEnterTitle')}
+            value={title}
+            disabled={isSavingMiniApp}
+            onChange={handleTitleChange}
+          />
+        </div>
+
+        <p className={styles.groupHint}>
+          {lang('BotFatherMenuButtonHint')}
+        </p>
+
+        {hasCustomButton && (
+          <div className={styles.disableMenuButtonCard}>
+            <button
+              type="button"
+              className={styles.disableMenuButton}
+              disabled={isSavingMiniApp}
+              onClick={handleDisableMenuButton}
+            >
+              {lang('BotFatherDisableMenuButton')}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className={styles.editInfoFooter}>
+        <Button
+          className={styles.updateSubmitButton}
+          disabled={isSavingMiniApp}
+          onClick={handleSave}
+        >
+          {isSavingMiniApp ? <Spinner color="white" /> : lang('BotFatherSave')}
+        </Button>
+      </div>
+    </div>
+  );
+};
+
+const BotFatherMainAppScreen = ({
+  bot, isSavingMiniApp, mainAppUrl, mainAppLaunchMode,
+}: MiniAppsScreenProps) => {
+  const {
+    showNotification, saveBotFatherMainApp, disableBotFatherMainApp,
+  } = getActions();
+  const lang = useLang();
+
+  const [url, setUrl] = useState(mainAppUrl || '');
+  const [launchMode, setLaunchMode] = useState<LaunchMode>(mainAppLaunchMode || 'compact');
+
+  useEffect(() => {
+    if (mainAppUrl !== undefined) {
+      setUrl(mainAppUrl);
+    }
+  }, [mainAppUrl]);
+
+  useEffect(() => {
+    if (mainAppLaunchMode) {
+      setLaunchMode(mainAppLaunchMode);
+    }
+  }, [mainAppLaunchMode]);
+
+  const hasMainApp = Boolean(bot.hasMainMiniApp || url.trim());
+
+  const handleUrlChange = useLastCallback((e: ChangeEvent<HTMLInputElement>) => {
+    setUrl(e.target.value);
+  });
+
+  const handleSelectCompact = useLastCallback(() => {
+    setLaunchMode('compact');
+  });
+
+  const handleSelectFullsize = useLastCallback(() => {
+    setLaunchMode('fullsize');
+  });
+
+  const handleSelectFullscreen = useLastCallback(() => {
+    setLaunchMode('fullscreen');
+  });
+
+  const handleSave = useLastCallback(() => {
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl) {
+      showNotification({ message: lang('BotFatherEnterUrl') });
+      return;
+    }
+
+    saveBotFatherMainApp({
+      url: trimmedUrl,
+      launchMode,
+    });
+  });
+
+  const handleDisable = useLastCallback(() => {
+    disableBotFatherMainApp();
+  });
+
+  return (
+    <div className={styles.screen}>
+      <div className={buildClassName(styles.scrollBody, 'custom-scroll')}>
+        <h2 className={styles.miniAppSubScreenTitle}>{lang('BotFatherMainApp')}</h2>
+
+        <div className={styles.commandInputsCard}>
+          <input
+            type="text"
+            className={styles.commandInput}
+            placeholder={lang('BotFatherEnterUrl')}
+            value={url}
+            disabled={isSavingMiniApp}
+            onChange={handleUrlChange}
+          />
+        </div>
+        <p className={styles.groupHint}>
+          {lang('BotFatherMainAppUrlHint')}
+        </p>
+
+        <h3 className={styles.scopeTitle}>{lang('BotFatherLaunchMode')}</h3>
+        <div className={styles.launchModesGrid}>
+          <button type="button" className={styles.launchModeOption} onClick={handleSelectCompact}>
+            <div className={styles.phoneMockup}>
+              <div className={styles.phoneNotch} />
+              <div className={styles.phoneMockupCompactFill} />
+            </div>
+            <span
+              className={buildClassName(
+                styles.launchModeLabel,
+                launchMode === 'compact' && styles.launchModeLabelSelected,
+              )}
+            >
+              {lang('BotFatherLaunchModeCompact')}
+            </span>
+          </button>
+
+          <button type="button" className={styles.launchModeOption} onClick={handleSelectFullsize}>
+            <div className={buildClassName(styles.phoneMockup, styles.phoneMockupFullsize)}>
+              <div className={styles.phoneNotch} />
+              <Icon name="arrow-left" className={styles.phoneArrowLeft} />
+            </div>
+            <span
+              className={buildClassName(
+                styles.launchModeLabel,
+                launchMode === 'fullsize' && styles.launchModeLabelSelected,
+              )}
+            >
+              {lang('BotFatherLaunchModeFullsize')}
+            </span>
+          </button>
+
+          <button type="button" className={styles.launchModeOption} onClick={handleSelectFullscreen}>
+            <div className={buildClassName(styles.phoneMockup, styles.phoneMockupFullscreen)}>
+              <div className={styles.phoneNotch} />
+            </div>
+            <span
+              className={buildClassName(
+                styles.launchModeLabel,
+                launchMode === 'fullscreen' && styles.launchModeLabelSelected,
+              )}
+            >
+              {lang('BotFatherLaunchModeFullscreen')}
+            </span>
+          </button>
+        </div>
+
+        <div className={styles.launchScreenCard}>
+          <button type="button" className={styles.navRow}>
+            <span className={styles.navLabel}>{lang('BotFatherLaunchScreen')}</span>
+            <Icon name="next" className={styles.rowChevron} />
+          </button>
+        </div>
+        <p className={styles.groupHint}>
+          {lang('BotFatherLaunchScreenHint')}
+        </p>
+
+        {hasMainApp && (
+          <div className={styles.disableMenuButtonCard}>
+            <button
+              type="button"
+              className={styles.disableMenuButton}
+              disabled={isSavingMiniApp}
+              onClick={handleDisable}
+            >
+              {lang('BotFatherDisableMainApp')}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className={styles.editInfoFooter}>
+        <Button
+          className={styles.updateSubmitButton}
+          disabled={isSavingMiniApp}
+          onClick={handleSave}
+        >
+          {isSavingMiniApp ? <Spinner color="white" /> : lang('BotFatherSave')}
+        </Button>
+      </div>
+    </div>
+  );
+};
+
+const BotFatherDirectLinkScreen = ({
+  bot, isSavingMiniApp, editingShortName, directLinks,
+}: MiniAppsScreenProps) => {
+  const { showNotification, createBotFatherDirectLink } = getActions();
+  const lang = useLang();
+  const fileInputRef = useRef<HTMLInputElement>();
+
+  const existing = editingShortName
+    ? directLinks?.find((item) => item.shortName.toLowerCase() === editingShortName.toLowerCase())
+    : undefined;
+
+  const [url, setUrl] = useState(existing?.url || '');
+  const [title, setTitle] = useState(existing?.title || '');
+  const [description, setDescription] = useState(existing?.description || '');
+  const [shortName, setShortName] = useState(editingShortName || '');
+  const [photo, setPhoto] = useState<File | undefined>();
+
+  const photoPreviewUrl = useObjectUrl(photo) || existing?.photoUrl;
+  const botUsername = getMainUsername(bot) || 'bot';
+  const isEditing = Boolean(editingShortName);
+
+  const handleUrlChange = useLastCallback((e: ChangeEvent<HTMLInputElement>) => {
+    setUrl(e.target.value);
+  });
+
+  const handleTitleChange = useLastCallback((e: ChangeEvent<HTMLInputElement>) => {
+    setTitle(e.target.value);
+  });
+
+  const handleDescriptionChange = useLastCallback((e: ChangeEvent<HTMLInputElement>) => {
+    setDescription(e.target.value);
+  });
+
+  const handleShortNameChange = useLastCallback((e: ChangeEvent<HTMLInputElement>) => {
+    if (isEditing) return;
+    setShortName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''));
+  });
+
+  const handlePickPhoto = useLastCallback(() => {
+    fileInputRef.current?.click();
+  });
+
+  const handlePhotoChange = useLastCallback((e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) setPhoto(file);
+    e.target.value = '';
+  });
+
+  const handleCreate = useLastCallback(() => {
+    const cleanShortName = shortName.trim().toLowerCase();
+    const trimmedUrl = url.trim();
+    if (!cleanShortName) {
+      showNotification({ message: lang('BotFatherChooseLinkHint') });
+      return;
+    }
+    if (!trimmedUrl) {
+      showNotification({ message: lang('BotFatherEnterUrl') });
+      return;
+    }
+    if (!isEditing && !photo) {
+      showNotification({ message: lang('BotFatherPhotoRequired') });
+      return;
+    }
+
+    createBotFatherDirectLink({
+      url: trimmedUrl,
+      title: title.trim() || cleanShortName,
+      description: description.trim() || title.trim() || cleanShortName,
+      shortName: cleanShortName,
+      photo,
+    });
+  });
+
+  return (
+    <div className={styles.screen}>
+      <div className={buildClassName(styles.scrollBody, 'custom-scroll')}>
+        <h2 className={styles.miniAppSubScreenTitle}>
+          {isEditing ? lang('BotFatherEditApp') : lang('BotFatherDirectLink')}
+        </h2>
+
+        <div className={styles.commandInputsCard}>
+          <input
+            type="text"
+            className={styles.commandInput}
+            placeholder={lang('BotFatherEnterUrl')}
+            value={url}
+            disabled={isSavingMiniApp}
+            onChange={handleUrlChange}
+          />
+        </div>
+
+        <h3 className={styles.scopeTitle}>{lang('BotFatherMetadata')}</h3>
+        <div className={styles.metadataCard}>
+          <div className={styles.metadataPreviewBox}>
+            <div className={styles.metadataDottedBox}>
+              {photoPreviewUrl ? (
+                <img src={photoPreviewUrl} alt="" className={styles.metadataCoverImg} />
+              ) : (
+                <Icon name="camera-add" className={styles.metadataDottedIcon} />
+              )}
+            </div>
+            <div className={styles.metadataPreviewText}>
+              <span className={styles.metadataPreviewTitle}>
+                {title.trim() || lang('BotFatherDirectLinkTitlePlaceholder')}
+              </span>
+              <span className={styles.metadataPreviewDesc}>
+                {description.trim() || lang('BotFatherDirectLinkDescPlaceholder')}
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className={styles.metadataSetPhotoPill}
+            disabled={isSavingMiniApp}
+            onClick={handlePickPhoto}
+          >
+            <Icon name="camera-add" className={styles.metadataSetPhotoIcon} />
+            <span>{lang('BotFatherSetPhotoOrGif')}</span>
+          </button>
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,image/gif"
+          className={styles.hiddenFileInput}
+          onChange={handlePhotoChange}
+        />
+
+        <div className={buildClassName(styles.commandInputsCard, 'mt-3')}>
+          <input
+            type="text"
+            className={styles.commandInput}
+            placeholder={lang('BotFatherDirectLinkTitlePlaceholder')}
+            value={title}
+            disabled={isSavingMiniApp}
+            onChange={handleTitleChange}
+          />
+          <div className={styles.commandInputDivider} />
+          <input
+            type="text"
+            className={styles.commandInput}
+            placeholder={lang('BotFatherDirectLinkDescPlaceholder')}
+            value={description}
+            disabled={isSavingMiniApp}
+            onChange={handleDescriptionChange}
+          />
+        </div>
+
+        <p className={styles.groupHint}>
+          {lang('BotFatherDirectLinkMetadataHint')}
+        </p>
+
+        <div className={styles.shortNameRow}>
+          <span className={styles.shortNamePrefix}>{`t.me/${botUsername}/`}</span>
+          <input
+            type="text"
+            className={styles.shortNameInput}
+            placeholder={lang('BotFatherDirectLinkShortNamePlaceholder')}
+            value={shortName}
+            disabled={isSavingMiniApp || isEditing}
+            onChange={handleShortNameChange}
+          />
+        </div>
+        <p className={styles.groupHint}>
+          {lang('BotFatherChooseLinkHint')}
+        </p>
+      </div>
+
+      <div className={styles.editInfoFooter}>
+        <Button
+          className={styles.updateSubmitButton}
+          disabled={isSavingMiniApp}
+          onClick={handleCreate}
+        >
+          {isSavingMiniApp
+            ? <Spinner color="white" />
+            : lang(isEditing ? 'BotFatherSave' : 'BotFatherCreateButton')}
+        </Button>
+      </div>
     </div>
   );
 };
@@ -1247,3 +2099,6 @@ export const EditInfoScreen = memo(BotFatherEditInfoScreen);
 export const CommandsScreen = memo(BotFatherCommandsScreen);
 export const EditCommandScreen = memo(BotFatherEditCommandScreen);
 export const MiniAppsScreen = memo(BotFatherMiniAppsScreen);
+export const MenuButtonScreen = memo(BotFatherMenuButtonScreen);
+export const MainAppScreen = memo(BotFatherMainAppScreen);
+export const DirectLinkScreen = memo(BotFatherDirectLinkScreen);
