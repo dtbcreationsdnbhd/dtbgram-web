@@ -45,7 +45,7 @@
 
 .logout {
   --button-text-color: var(--color-text);
-  --button-background-color: #fff;
+  --button-background-color: var(--color-background);
   --button-active-text-color: var(--color-text);
   --button-active-background-color: var(--color-chat-hover);
 
