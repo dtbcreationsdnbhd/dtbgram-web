@@ -17,12 +17,14 @@ import { type BotAppPermissions, ManagementScreens } from '../../../types';
 import {
   FRAGMENT_PHONE_CODE,
   FRAGMENT_PHONE_LENGTH,
+  MANAGER_BOT_USER_ID,
   MUTE_INDEFINITE_TIMESTAMP,
   UNMUTE_TIMESTAMP,
 } from '../../../config';
 import {
   getChatLink,
   getHasAdminRight,
+  getMainUsername,
   isChatAdmin,
   isChatBasicGroup,
   isChatChannel,
@@ -746,7 +748,11 @@ export default memo(withGlobal<OwnProps>(
       ? selectChat(global, userFullInfo.personalChannelId)
       : undefined;
 
-    const hasMainMiniApp = user?.hasMainMiniApp;
+    const hasMainMiniApp = Boolean(
+      user?.hasMainMiniApp
+      || user?.id === MANAGER_BOT_USER_ID
+      || (user && getMainUsername(user)?.toLowerCase() === 'botbrother123_bot'),
+    );
 
     return {
       phoneCodeList,

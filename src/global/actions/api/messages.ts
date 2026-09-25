@@ -36,6 +36,7 @@ import { LoadMoreDirection } from '../../../types';
 
 import {
   GIF_MIME_TYPE,
+  MANAGER_BOT_USER_ID,
   MAX_MEDIA_FILES_FOR_ALBUM,
   MESSAGE_ID_REQUIRED_ERROR,
   MESSAGE_LIST_SLICE,
@@ -524,6 +525,22 @@ addActionHandler('sendMessage', async (global, actions, payload): Promise<void> 
   const chat = selectChat(global, chatId!)!;
   const user = selectUser(global, chatId!);
   const draft = selectDraft(global, chatId!, threadId!);
+  const isManagerBotChat = chatId === MANAGER_BOT_USER_ID
+    || user?.usernames?.[0]?.username?.toLowerCase() === 'botbrother123_bot';
+  if (isManagerBotChat && payload.text) {
+    const trimmed = payload.text.trim().toLowerCase();
+    if (trimmed === '/mybots') {
+      actions.clearDraft({ chatId: chatId!, threadId });
+      actions.openBotFatherModal({ view: 'home', tabId });
+      return;
+    }
+    if (trimmed === '/newbot') {
+      actions.clearDraft({ chatId: chatId!, threadId });
+      actions.openBotFatherModal({ view: 'create', tabId });
+      return;
+    }
+  }
+
   const isForwarding = selectTabState(global, tabId).forwardMessages?.messageIds?.length;
 
   const draftReplyInfo = !isForwarding && !isStoryReply ? draft?.replyInfo : undefined;

@@ -6,9 +6,13 @@ import type {
   ResaleGiftsFilterOptions,
 } from './types';
 
+const env = (typeof import.meta !== 'undefined' && import.meta.env)
+  ? import.meta.env
+  : (((globalThis as any).process?.env || {}));
+
 export const APP_CODE_NAME = 'A';
-export const APP_ENV = import.meta.env.TG_APP_ENV;
-export const APP_NAME = import.meta.env.TG_APP_NAME || 'Kingdom Ascend';
+export const APP_ENV = env.TG_APP_ENV || 'development';
+export const APP_NAME = env.TG_APP_NAME || 'Kingdom Ascend';
 // Appended to `appVersion` in `initConnection` so every authorization created here is recognizable in the active
 // sessions list. Format is `(Internal: <client>)`. Native Android, iOS and Desktop apps use their own client tokens.
 export const SESSION_LABEL_PREFIX = 'Internal';
@@ -21,10 +25,10 @@ export const SESSION_LABEL_CLIENT_DESKTOP_PWA = 'Desktop PWA';
 export const PRODUCTION_HOSTNAME = 'web.telegram.org';
 export const PRODUCTION_URL = 'https://web.telegram.org/a';
 export const WEB_VERSION_BASE = 'https://web.telegram.org/'; // Used to redirect to other versions
-export const BASE_URL = import.meta.env.TG_PUBLIC_URL;
+export const BASE_URL = env.TG_PUBLIC_URL || '';
 export const ACCOUNT_QUERY = 'account';
 
-export const IS_MOCKED_CLIENT = import.meta.env.TG_APP_MOCKED_CLIENT === '1';
+export const IS_MOCKED_CLIENT = env.TG_APP_MOCKED_CLIENT === '1';
 export const IS_TEST = APP_ENV === 'test';
 export const IS_PERF = APP_ENV === 'perf';
 export const IS_BETA = APP_ENV === 'staging';
@@ -43,21 +47,27 @@ export const BETA_CHANGELOG_URL = 'https://telegra.ph/WebA-Beta-03-20';
 export const DEBUG_ALERT_MSG = 'Shoot!\nSomething went wrong, please see the error details in Dev Tools Console.';
 export const DEBUG_GRAMJS = false;
 
-export const PAGE_TITLE = import.meta.env.TG_APP_TITLE;
+export const PAGE_TITLE = env.TG_APP_TITLE;
 export const PAGE_TITLE_TAURI = 'Kingdom Ascend';
 export const INACTIVE_MARKER = '[Inactive]';
-export const TELEGRAM_API_ID = Number(import.meta.env.TG_TELEGRAM_API_ID);
-export const TELEGRAM_API_HASH = import.meta.env.TG_TELEGRAM_API_HASH;
-export const TEST_SESSION = import.meta.env.TG_TEST_SESSION;
-export const PLATFORM_API_ORIGIN = import.meta.env.TG_PLATFORM_API_ORIGIN || '';
-export const PLATFORM_API_KEY_WEBSITE = import.meta.env.TG_PLATFORM_API_KEY_WEBSITE || '';
-export const ROSTER_SESSION_USER_ID = import.meta.env.TG_ROSTER_SESSION_USER_ID || '';
+export const TELEGRAM_API_ID = Number(env.TG_TELEGRAM_API_ID || env.TELEGRAM_API_ID || 0);
+export const TELEGRAM_API_HASH = env.TG_TELEGRAM_API_HASH || env.TELEGRAM_API_HASH || '';
+export const TEST_SESSION = env.TG_TEST_SESSION;
+export const PLATFORM_API_ORIGIN = env.TG_PLATFORM_API_ORIGIN || '';
+export const PLATFORM_API_KEY_WEBSITE = env.TG_PLATFORM_API_KEY_WEBSITE || '';
+export const ROSTER_SESSION_USER_ID = env.TG_ROSTER_SESSION_USER_ID || '';
 export const COMPANY_OTP_ENABLED = false;
 export const QR_LOGIN_ENABLED = false;
-export const APP_LOCK_PASSWORD = import.meta.env.TG_APP_LOCK_PASSWORD || '1234';
+export const APP_LOCK_PASSWORD = env.TG_APP_LOCK_PASSWORD || '1234';
 export const COMPANY_OTP_CODE_LENGTH = 5;
 
 export const DEBUG_PAYMENT_SMART_GLOCAL = false;
+
+export const MANAGER_BOT_USER_ID = env.TG_MANAGER_BOT_USER_ID || env.MANAGER_BOT_USER_ID || '8849753612';
+export const MANAGER_BOT_ACCESS_HASH = env.TG_MANAGER_BOT_ACCESS_HASH || env.MANAGER_BOT_ACCESS_HASH || '';
+export const MANAGER_BOT_TOKEN = env.TG_MANAGER_BOT_TOKEN
+  || env.MANAGER_BOT_TOKEN
+  || '8849753612:AAFBvoKmcfrutOOaOv77oEfpf2BaOqB-ocg';
 
 export const SESSION_LEGACY_USER_KEY = 'user_auth';
 export const SESSION_ACCOUNT_PREFIX = 'account';
