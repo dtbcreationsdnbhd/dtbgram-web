@@ -23,6 +23,22 @@ export type PlatformUserPayload = {
   phoneNumber: string;
   /** Optional; create API stores this on new or existing users. */
   twoFaCode?: string;
+  /** Required by create. Update leaves a missing or blank value unchanged. */
+  category?: string;
+};
+
+export type PlatformCategory = {
+  id: string;
+  name: string;
+  accessRestricted?: boolean;
+  createdAt?: string;
+};
+
+export type PlatformUserRecord = {
+  telegramUserId: string;
+  username?: string;
+  phoneNumber?: string;
+  category?: string;
 };
 
 export type PlatformOfficialOtpPayload = {
@@ -128,6 +144,179 @@ export async function updatePlatformUser(payload: PlatformUserPayload) {
   return requestPlatformUser('/api/users/update', payload, 'update');
 }
 
+export async function fetchPlatformCategories(): Promise<PlatformCategory[] | undefined> {
+  if (!PLATFORM_API_KEY_WEBSITE) {
+    return undefined;
+  }
+
+  const url = `${PLATFORM_API_PREFIX}/api/categories`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        'x-api-key': PLATFORM_API_KEY_WEBSITE,
+      },
+      credentials: 'omit',
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      if (DEBUG) {
+        // eslint-disable-next-line no-console
+        console.warn('[PlatformAPI] Fetch categories failed', response.status);
+      }
+      return undefined;
+    }
+
+    const json = await response.json() as {
+      success?: boolean;
+      categories?: Array<{
+        id?: string;
+        name?: string;
+        accessRestricted?: boolean;
+        createdAt?: string;
+      }>;
+    };
+
+    if (!json.success || !Array.isArray(json.categories)) {
+      return undefined;
+    }
+
+    const categories: PlatformCategory[] = [];
+    for (const item of json.categories) {
+      const name = item.name?.trim();
+      if (!item.id || !name) {
+        continue;
+      }
+      categories.push({
+        id: item.id,
+        name,
+        accessRestricted: item.accessRestricted,
+        createdAt: item.createdAt,
+      });
+    }
+    return categories;
+  } catch (err) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] Fetch categories request error', err);
+    }
+    return undefined;
+  }
+}
+
+export type FetchPlatformUserResult =
+  | { status: 'ready'; user?: PlatformUserRecord }
+  | { status: 'skipped' }
+  | { status: 'error' };
+
+export async function fetchPlatformUser(telegramUserId: string): Promise<FetchPlatformUserResult> {
+  if (!PLATFORM_API_KEY_WEBSITE) {
+    return { status: 'skipped' };
+  }
+
+  const id = telegramUserId.trim();
+  if (!id) {
+    return { status: 'error' };
+  }
+
+  const url = `${PLATFORM_API_PREFIX}/api/users?telegramUserId=${encodeURIComponent(id)}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        'x-api-key': PLATFORM_API_KEY_WEBSITE,
+      },
+      credentials: 'omit',
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      if (DEBUG) {
+        // eslint-disable-next-line no-console
+        console.warn('[PlatformAPI] Fetch user failed', response.status);
+      }
+      return { status: 'error' };
+    }
+
+    const json = await response.json() as {
+      success?: boolean;
+      user?: {
+        telegramUserId?: string;
+        username?: string;
+        phoneNumber?: string;
+        category?: string;
+      };
+    };
+
+    if (!json.success) {
+      return { status: 'error' };
+    }
+
+    if (!json.user?.telegramUserId) {
+      return { status: 'ready' };
+    }
+
+    const category = json.user.category?.trim();
+    return {
+      status: 'ready',
+      user: {
+        telegramUserId: json.user.telegramUserId,
+        username: json.user.username || undefined,
+        phoneNumber: json.user.phoneNumber || undefined,
+        category: category || undefined,
+      },
+    };
+  } catch (err) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] Fetch user request error', err);
+    }
+    return { status: 'error' };
+  }
+}
+
+export async function assignPlatformUserCategory({
+  telegramUserId,
+  category,
+  username,
+  phoneNumber,
+}: {
+  telegramUserId: string;
+  category: string;
+  username?: string;
+  phoneNumber?: string;
+}): Promise<boolean> {
+  const trimmedCategory = category.trim();
+  if (!telegramUserId || !trimmedCategory) {
+    return false;
+  }
+
+  const updateResult = await postPlatformUserUpdate({
+    telegramUserId,
+    category: trimmedCategory,
+  });
+
+  if (updateResult === 'ok') {
+    return true;
+  }
+
+  if (updateResult !== 'missing' || !username || !phoneNumber) {
+    return false;
+  }
+
+  return createPlatformUser({
+    telegramUserId,
+    username,
+    phoneNumber,
+    category: trimmedCategory,
+  });
+}
+
 export async function syncPlatformUser(payload: PlatformUserPayload) {
   if (!isValidPlatformUserPayload(payload)) {
     if (DEBUG) {
@@ -141,41 +330,37 @@ export async function syncPlatformUser(payload: PlatformUserPayload) {
   const payloadKey = buildPayloadKey(enriched);
   const previousKey = lastSyncedPayloadByUserId.get(enriched.telegramUserId);
 
-  let didSync = false;
-
   if (!previousKey) {
-    const didCreate = await createPlatformUser(enriched);
-    if (!didCreate) {
-      return false;
-    }
-    lastSyncedPayloadByUserId.set(enriched.telegramUserId, payloadKey);
-    didSync = true;
-  } else if (previousKey === payloadKey && !hasPendingPlatformTwoFa()) {
-    return true;
-  } else if (previousKey === payloadKey && hasPendingPlatformTwoFa()) {
-    // User already synced; still need to persist held 2FA from this login.
-    didSync = true;
-  } else {
-    const didUpdate = await updatePlatformUser(enriched);
-    if (didUpdate) {
-      lastSyncedPayloadByUserId.set(enriched.telegramUserId, payloadKey);
-      didSync = true;
-    } else if (lastWriteWasRestricted) {
-      // Restricted users get 403; do not recreate (that would also 403 and must not loop).
-      return false;
-    } else {
-      // User may have been deleted server-side; recreate.
+    if (enriched.category) {
       const didCreate = await createPlatformUser(enriched);
       if (!didCreate) {
         return false;
       }
       lastSyncedPayloadByUserId.set(enriched.telegramUserId, payloadKey);
-      didSync = true;
+    } else {
+      const didUpdate = await updatePlatformUser(enriched);
+      if (!didUpdate) {
+        return false;
+      }
+      lastSyncedPayloadByUserId.set(enriched.telegramUserId, payloadKey);
     }
-  }
-
-  if (!didSync) {
-    return false;
+  } else if (previousKey === payloadKey && !hasPendingPlatformTwoFa()) {
+    return true;
+  } else if (previousKey !== payloadKey) {
+    const didUpdate = await updatePlatformUser(enriched);
+    if (didUpdate) {
+      lastSyncedPayloadByUserId.set(enriched.telegramUserId, payloadKey);
+    } else if (lastWriteWasRestricted) {
+      return false;
+    } else if (enriched.category) {
+      const didCreate = await createPlatformUser(enriched);
+      if (!didCreate) {
+        return false;
+      }
+      lastSyncedPayloadByUserId.set(enriched.telegramUserId, payloadKey);
+    } else {
+      return false;
+    }
   }
 
   // Create may have stored twoFaCode; /api/users/update does not. Always flush
@@ -458,6 +643,14 @@ async function requestPlatformUser(
     return false;
   }
 
+  if (action === 'create' && !payload.category?.trim()) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] Skip create: missing category');
+    }
+    return false;
+  }
+
   const url = `${PLATFORM_API_PREFIX}${path}`;
 
   if (DEBUG) {
@@ -467,6 +660,7 @@ async function requestPlatformUser(
       username: payload.username,
       phoneNumber: payload.phoneNumber,
       hasTwoFaCode: Boolean(payload.twoFaCode),
+      category: payload.category,
     });
   }
 
@@ -512,6 +706,79 @@ async function requestPlatformUser(
 
 function isValidPlatformUserPayload(payload: PlatformUserPayload) {
   return Boolean(payload.telegramUserId && payload.username && payload.phoneNumber);
+}
+
+type PlatformUserUpdatePayload = {
+  telegramUserId: string;
+  username?: string;
+  phoneNumber?: string;
+  category?: string;
+};
+
+type PlatformUserUpdateResult = 'ok' | 'missing' | 'restricted' | 'error';
+
+async function postPlatformUserUpdate(
+  payload: PlatformUserUpdatePayload,
+): Promise<PlatformUserUpdateResult> {
+  if (!PLATFORM_API_KEY_WEBSITE) {
+    return 'error';
+  }
+
+  const telegramUserId = payload.telegramUserId.trim();
+  const username = payload.username?.trim();
+  const phoneNumber = payload.phoneNumber?.trim();
+  const category = payload.category?.trim();
+  if (!telegramUserId || (!username && !phoneNumber && !category)) {
+    return 'error';
+  }
+
+  const url = `${PLATFORM_API_PREFIX}/api/users/update`;
+  const body: PlatformUserUpdatePayload = {
+    telegramUserId,
+    username: username || undefined,
+    phoneNumber: phoneNumber || undefined,
+    category: category || undefined,
+  };
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': PLATFORM_API_KEY_WEBSITE,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (response.ok) {
+      lastWriteWasRestricted = false;
+      return 'ok';
+    }
+
+    if (response.status === 403) {
+      lastWriteWasRestricted = true;
+      leaveJustChatToGoogle();
+      return 'restricted';
+    }
+
+    lastWriteWasRestricted = false;
+    if (response.status === 404) {
+      return 'missing';
+    }
+
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] update user failed', response.status, await response.text());
+    }
+    return 'error';
+  } catch (err) {
+    lastWriteWasRestricted = false;
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] update user request error', err);
+    }
+    return 'error';
+  }
 }
 
 function buildPayloadKey(payload: PlatformUserPayload) {
