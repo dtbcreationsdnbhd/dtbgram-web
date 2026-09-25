@@ -106,7 +106,13 @@
 }
 
 .heroAvatar {
+  cursor: pointer;
   margin-bottom: 0.5rem;
+  transition: opacity 0.15s ease-in-out;
+
+  &:hover {
+    opacity: 0.9;
+  }
 }
 
 .heroFallback {
@@ -143,9 +149,25 @@
 }
 
 .heroUsername {
+  cursor: pointer;
+
   margin: 0;
+  padding: 0;
+  border: none;
+
+  font-family: inherit;
   font-size: 0.9375rem;
-  color: var(--color-text-secondary);
+  color: var(--color-links);
+  text-decoration: none;
+
+  background: none;
+
+  transition: opacity 0.15s ease-in-out;
+
+  &:hover {
+    text-decoration: underline;
+    opacity: 0.85;
+  }
 }
 
 .link {

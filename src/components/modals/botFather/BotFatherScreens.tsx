@@ -13,6 +13,7 @@ import buildClassName from '../../../util/buildClassName';
 import { copyTextToClipboard } from '../../../util/clipboard';
 import { isUsernameValid } from '../../../util/entities/username';
 import { debounce } from '../../../util/schedulers';
+import stopEvent from '../../../util/stopEvent';
 import { callApi } from '../../../api/gramjs';
 
 import useFlag from '../../../hooks/useFlag';
@@ -524,6 +525,8 @@ const BotFatherManageScreen = ({
     revokeBotFatherBotToken,
     deleteBotViaBotFather,
     showNotification,
+    openChatWithInfo,
+    closeBotFatherModal,
   } = getActions();
 
   const lang = useLang();
@@ -534,6 +537,12 @@ const BotFatherManageScreen = ({
 
   const username = getMainUsername(bot);
   const isBusy = Boolean(isDeletingBot || isRunningManageCommand || isRevokingToken);
+
+  const handleOpenBotProfile = useLastCallback((e: React.MouseEvent) => {
+    stopEvent(e);
+    closeBotFatherModal();
+    openChatWithInfo({ id: bot.id });
+  });
 
   const handleToggleToken = useLastCallback(() => {
     if (isTokenVisible) {
@@ -658,9 +667,17 @@ const BotFatherManageScreen = ({
     <div className={styles.screen}>
       <div className={buildClassName(styles.scrollBody, 'custom-scroll')}>
         <div className={styles.hero}>
-          <Avatar peer={bot} size="jumbo" className={styles.heroAvatar} />
+          <Avatar peer={bot} size="jumbo" className={styles.heroAvatar} onClick={handleOpenBotProfile} />
           <h2 className={styles.heroTitle}>{getUserFullName(bot)}</h2>
-          {username && <p className={styles.heroUsername}>{`@${username}`}</p>}
+          {username && (
+            <button
+              type="button"
+              className={styles.heroUsername}
+              onClick={handleOpenBotProfile}
+            >
+              {`@${username}`}
+            </button>
+          )}
         </div>
 
         <div className={styles.tokenCard}>
