@@ -2132,53 +2132,66 @@ addActionHandler('saveBotFatherEditInfo', async (global, actions, payload): Prom
   }, tabId);
   setGlobal(global);
 
-  const token = await callApi('exportBotToken', { bot, revoke: false, botUsername: getMainUsername(bot) });
-  global = getGlobal();
-  const langCode = selectSharedSettings(global).language;
-  await callApi('setBotInfo', {
-    bot,
-    langCode,
-    name: name.trim() || undefined,
-    about: about?.trim() || undefined,
-    description: description?.trim() || undefined,
-    token,
-  });
-
-  global = getGlobal();
-  if (about?.trim()) {
-    global = updateUserFullInfo(global, bot.id, { bio: about.trim() });
-  }
-  if (name.trim()) {
-    global = updateUser(global, bot.id, { firstName: name.trim() });
-  }
-
-  if (photo) {
-    actions.uploadProfilePhoto({
-      file: photo,
+  try {
+    const token = await callApi('exportBotToken', { bot, revoke: false, botUsername: getMainUsername(bot) });
+    global = getGlobal();
+    const langCode = selectSharedSettings(global).language;
+    await callApi('setBotInfo', {
       bot,
+      langCode,
+      name: name.trim() || undefined,
+      about: about?.trim() || undefined,
+      description: description?.trim() || undefined,
+      token,
+    });
+
+    if (photo) {
+      await callApi('uploadProfilePhoto', photo, undefined, false, 0, bot);
+      actions.loadFullUser({ userId: bot.id });
+    }
+
+    global = getGlobal();
+    if (about?.trim()) {
+      global = updateUserFullInfo(global, bot.id, { bio: about.trim() });
+    }
+    if (name.trim()) {
+      global = updateUser(global, bot.id, { firstName: name.trim() });
+    }
+
+    const currentModal = selectTabState(global, tabId).botFatherModal;
+    if (currentModal) {
+      global = updateTabState(global, {
+        botFatherModal: {
+          ...currentModal,
+          isSaving: undefined,
+          view: 'manage',
+        },
+      }, tabId);
+      setGlobal(global);
+    }
+
+    actions.showNotification({
+      message: { key: 'BotFatherInfoUpdated' },
+      tabId,
+    });
+  } catch (err) {
+    global = getGlobal();
+    const currentModal = selectTabState(global, tabId).botFatherModal;
+    if (currentModal) {
+      global = updateTabState(global, {
+        botFatherModal: {
+          ...currentModal,
+          isSaving: undefined,
+        },
+      }, tabId);
+      setGlobal(global);
+    }
+
+    actions.showNotification({
+      message: { key: 'BotFatherAutomationError' },
       tabId,
     });
   }
-
-  const currentModal = selectTabState(global, tabId).botFatherModal;
-  if (!currentModal) {
-    setGlobal(global);
-    return;
-  }
-
-  global = updateTabState(global, {
-    botFatherModal: {
-      ...currentModal,
-      isSaving: undefined,
-      view: 'manage',
-    },
-  }, tabId);
-  setGlobal(global);
-
-  actions.showNotification({
-    message: { key: 'BotFatherInfoUpdated' },
-    tabId,
-  });
 });
 
 addActionHandler('createBotViaBotFather', async (global, actions, payload): Promise<void> => {
@@ -2252,11 +2265,8 @@ addActionHandler('createBotViaBotFather', async (global, actions, payload): Prom
   }
 
   if (photo) {
-    actions.uploadProfilePhoto({
-      file: photo,
-      bot,
-      tabId,
-    });
+    await callApi('uploadProfilePhoto', photo, undefined, false, 0, bot);
+    actions.loadFullUser({ userId: bot.id });
   }
 
   const cleanUsername = username
