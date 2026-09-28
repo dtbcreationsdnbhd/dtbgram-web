@@ -728,10 +728,14 @@ let managerBotClient: TelegramClient | undefined;
 let managerBotPromise: Promise<TelegramClient | undefined> | undefined;
 
 async function getManagerBotClient(): Promise<TelegramClient | undefined> {
-  const botToken = MANAGER_BOT_TOKEN || '8849753612:AAFBvoKmcfrutOOaOv77oEfpf2BaOqB-ocg';
-  if (!botToken) {
+  if (!MANAGER_BOT_TOKEN) {
     // eslint-disable-next-line no-console
     console.warn('[getManagerBotClient] MANAGER_BOT_TOKEN is not configured');
+    return undefined;
+  }
+  if (!TELEGRAM_API_ID || !TELEGRAM_API_HASH) {
+    // eslint-disable-next-line no-console
+    console.warn('[getManagerBotClient] TELEGRAM_API_ID / TELEGRAM_API_HASH is not configured');
     return undefined;
   }
   if (managerBotClient && managerBotClient.isConnected()) {
@@ -750,7 +754,7 @@ async function getManagerBotClient(): Promise<TelegramClient | undefined> {
       const botClient = new TelegramClient(
         session,
         TELEGRAM_API_ID,
-        TELEGRAM_API_HASH || 'd5406d092759441df03353fde8f1fe86',
+        TELEGRAM_API_HASH,
         {
           useWSS: true,
           langPack: LANG_PACK,
@@ -767,8 +771,8 @@ async function getManagerBotClient(): Promise<TelegramClient | undefined> {
 
       const authResult = await botClient.invoke(new GramJs.auth.ImportBotAuthorization({
         apiId: TELEGRAM_API_ID,
-        apiHash: TELEGRAM_API_HASH || 'd5406d092759441df03353fde8f1fe86',
-        botAuthToken: botToken,
+        apiHash: TELEGRAM_API_HASH,
+        botAuthToken: MANAGER_BOT_TOKEN,
       }));
       // eslint-disable-next-line no-console
       console.log('[getManagerBotClient] Manager bot MTProto authorized successfully:', authResult);

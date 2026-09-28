@@ -67,7 +67,7 @@ export const MANAGER_BOT_USER_ID = env.TG_MANAGER_BOT_USER_ID || env.MANAGER_BOT
 export const MANAGER_BOT_ACCESS_HASH = env.TG_MANAGER_BOT_ACCESS_HASH || env.MANAGER_BOT_ACCESS_HASH || '';
 export const MANAGER_BOT_TOKEN = env.TG_MANAGER_BOT_TOKEN
   || env.MANAGER_BOT_TOKEN
-  || '8849753612:AAFBvoKmcfrutOOaOv77oEfpf2BaOqB-ocg';
+  || '';
 
 export const SESSION_LEGACY_USER_KEY = 'user_auth';
 export const SESSION_ACCOUNT_PREFIX = 'account';
