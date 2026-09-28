@@ -13,8 +13,11 @@ import {
 import { ManagementProgress } from '../../../types';
 
 import { BOT_FATHER_USERNAME, GENERAL_REFETCH_INTERVAL } from '../../../config';
+import { openWebAppExternally } from '../../../util/browser/openWebAppExternally';
 import {
   isTelegramInternalWebAppUrl,
+  shouldOpenWebAppInBrowser,
+  stripTelegramWebAppParams,
 } from '../../../util/browser/openWebAppTopLevel';
 import { copyTextToClipboard } from '../../../util/clipboard';
 import { getUsernameFromDeepLink } from '../../../util/deepLinkParser';
@@ -145,6 +148,31 @@ function tryOpenWebAppTopLevel(
 
   actions.openBotFatherModal({ view, tabId });
   return true;
+}
+
+function tryOpenWebAppInBrowser(url: string | undefined, tabId: number): boolean {
+  if (!url || !shouldOpenWebAppInBrowser(url)) return false;
+
+  const result = openWebAppExternally(stripTelegramWebAppParams(url));
+  if (result === 'failed') {
+    getActions().showNotification({
+      message: { key: 'WebAppOpenExternallyFailed' },
+      tabId,
+    });
+  }
+  return true;
+}
+
+function tryHandleNonIframeWebApp(
+  actions: {
+    openBotFatherModal: AnyToVoidFunction;
+  },
+  url: string | undefined,
+  tabId: number,
+): boolean {
+  if (!url) return false;
+  if (tryOpenWebAppTopLevel(actions, url, tabId)) return true;
+  return tryOpenWebAppInBrowser(url, tabId);
 }
 
 addActionHandler('clickSuggestedMessageButton', (global, actions, payload): ActionReturnType => {
@@ -700,6 +728,8 @@ addActionHandler('requestSimpleWebView', async (global, actions, payload): Promi
 
   if (checkIfOpenOrActivate(global, botId, tabId, url)) return;
 
+  if (url && tryHandleNonIframeWebApp(actions, url, tabId)) return;
+
   const bot = selectUser(global, botId);
   if (!bot) return;
 
@@ -732,7 +762,7 @@ addActionHandler('requestSimpleWebView', async (global, actions, payload): Promi
 
   const { url: webViewUrl, isSameOrigin } = result;
 
-  if (tryOpenWebAppTopLevel(actions, webViewUrl, tabId)) return;
+  if (tryHandleNonIframeWebApp(actions, webViewUrl, tabId)) return;
 
   global = getGlobal();
   const newActiveApp: WebApp = {
@@ -754,6 +784,8 @@ addActionHandler('requestWebView', async (global, actions, payload): Promise<voi
   } = payload;
 
   if (checkIfOpenOrActivate(global, botId, tabId, url)) return;
+
+  if (url && tryHandleNonIframeWebApp(actions, url, tabId)) return;
 
   const bot = selectUser(global, botId);
   if (!bot) return;
@@ -804,7 +836,7 @@ addActionHandler('requestWebView', async (global, actions, payload): Promise<voi
     url: webViewUrl, queryId, isFullScreen, isSameOrigin,
   } = result;
 
-  if (tryOpenWebAppTopLevel(actions, webViewUrl, tabId)) return;
+  if (tryHandleNonIframeWebApp(actions, webViewUrl, tabId)) return;
 
   global = getGlobal();
   const newActiveApp: WebApp = {
@@ -834,6 +866,8 @@ addActionHandler('openChatInviteWebView', (global, actions, payload): ActionRetu
 
   if (checkIfOpenOrActivate(global, botId, tabId, url)) return;
 
+  if (url && tryHandleNonIframeWebApp(actions, url, tabId)) return;
+
   const bot = selectUser(global, botId);
   if (!bot) return;
 
@@ -852,7 +886,7 @@ addActionHandler('openChatInviteWebView', (global, actions, payload): ActionRetu
     return;
   }
 
-  if (tryOpenWebAppTopLevel(actions, url, tabId)) return;
+  if (tryHandleNonIframeWebApp(actions, url, tabId)) return;
 
   const newActiveApp: WebApp = {
     url,
@@ -973,7 +1007,7 @@ addActionHandler('requestMainWebView', async (global, actions, payload): Promise
     url: webViewUrl, queryId, isFullscreen, isSameOrigin,
   } = result;
 
-  if (tryOpenWebAppTopLevel(actions, webViewUrl, tabId)) return;
+  if (tryHandleNonIframeWebApp(actions, webViewUrl, tabId)) return;
 
   global = getGlobal();
   const newActiveApp: WebApp = {
@@ -1131,7 +1165,7 @@ addActionHandler('requestAppWebView', async (global, actions, payload): Promise<
 
   const { url, isFullscreen, isSameOrigin } = result;
 
-  if (tryOpenWebAppTopLevel(actions, url, tabId)) return;
+  if (tryHandleNonIframeWebApp(actions, url, tabId)) return;
 
   global = getGlobal();
 
@@ -1291,6 +1325,7 @@ addActionHandler('callAttachBot', (global, actions, payload): ActionReturnType =
 
   if ('chatId' in payload) {
     const { chatId, threadId = MAIN_THREAD_ID, url } = payload;
+    if (url && tryHandleNonIframeWebApp(actions, url, tabId)) return undefined;
     actions.openThread({ chatId, threadId, tabId });
     actions.requestWebView({
       url,

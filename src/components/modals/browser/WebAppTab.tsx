@@ -25,6 +25,7 @@ import {
 } from '../../../global/selectors';
 import { IFRAME_ALLOW_ATTRIBUTES, IFRAME_SANDBOX_ATTRIBUTES } from '../../../util/browser/iframe';
 import { openWebAppExternally } from '../../../util/browser/openWebAppExternally';
+import { shouldOpenWebAppInBrowser, stripTelegramWebAppParams } from '../../../util/browser/openWebAppTopLevel';
 import { getGeolocationStatus, IS_GEOLOCATION_SUPPORTED } from '../../../util/browser/windowEnvironment';
 import buildClassName from '../../../util/buildClassName';
 import buildStyle from '../../../util/buildStyle.ts';
@@ -706,7 +707,9 @@ const WebAppTab = ({
   const handleOpenExternally = useLastCallback(() => {
     if (!url) return;
 
-    const result = openWebAppExternally(url);
+    const result = openWebAppExternally(
+      shouldOpenWebAppInBrowser(url) ? stripTelegramWebAppParams(url) : url,
+    );
     if (result === 'failed') {
       showNotification({
         message: { key: 'WebAppOpenExternallyFailed' },
@@ -717,6 +720,11 @@ const WebAppTab = ({
     closeCurrentWebApp();
   });
 
+  useEffect(() => {
+    if (!isActive || !url || !shouldOpenWebAppInBrowser(url)) return;
+    handleOpenExternally();
+  }, [handleOpenExternally, isActive, url]);
+
   const handleCopyWebAppLink = useLastCallback(() => {
     if (!url) return;
     copyTextToClipboard(url);
@@ -726,6 +734,8 @@ const WebAppTab = ({
   });
 
   const handleContinueEmbedAnyway = useLastCallback(() => {
+    hasHandshakeRef.current = true;
+    markHandshake();
     hideEmbedFallback();
     revealFrame();
     markLoaded();

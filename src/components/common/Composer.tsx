@@ -122,6 +122,8 @@ import {
   selectEditingScheduledDraft,
   selectNoWebPage,
 } from '../../global/selectors/threads';
+import { openWebAppExternally } from '../../util/browser/openWebAppExternally';
+import { shouldOpenWebAppInBrowser, stripTelegramWebAppParams } from '../../util/browser/openWebAppTopLevel';
 import {
   IS_IOS, IS_VIDEO_RECORDING_SUPPORTED, IS_VOICE_RECORDING_SUPPORTED,
 } from '../../util/browser/windowEnvironment';
@@ -1636,6 +1638,16 @@ const Composer = ({
 
   const handleClickBotMenu = useLastCallback(() => {
     if (botMenuButton?.type !== 'webApp') {
+      return;
+    }
+
+    if (shouldOpenWebAppInBrowser(botMenuButton.url)) {
+      const result = openWebAppExternally(stripTelegramWebAppParams(botMenuButton.url));
+      if (result === 'failed') {
+        showNotification({
+          message: { key: 'WebAppOpenExternallyFailed' },
+        });
+      }
       return;
     }
 
