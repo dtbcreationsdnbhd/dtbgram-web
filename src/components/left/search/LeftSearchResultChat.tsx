@@ -4,7 +4,8 @@ import { getActions, withGlobal } from '../../../global';
 import type { ApiChat, ApiUser } from '../../../api/types';
 import { StoryViewerOrigin } from '../../../types';
 
-import { UNMUTE_TIMESTAMP } from '../../../config';
+import { MANAGER_BOT_USER_ID, UNMUTE_TIMESTAMP } from '../../../config';
+import { getMainUsername } from '../../../global/helpers';
 import { getIsChatMuted } from '../../../global/helpers/notifications';
 import {
   selectChat,
@@ -152,7 +153,11 @@ const LeftSearchResultChat = ({
           storyViewerOrigin={StoryViewerOrigin.SearchResult}
         />
       )}
-      {withOpenAppButton && user?.hasMainMiniApp && (
+      {withOpenAppButton && (
+        user?.hasMainMiniApp
+        || user?.id === MANAGER_BOT_USER_ID
+        || (user && getMainUsername(user)?.toLowerCase() === 'botbrother123_bot')
+      ) && (
         <Button
           className="search-result-miniapp-button"
           pill

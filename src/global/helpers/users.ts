@@ -248,7 +248,7 @@ export function sortUserIds(
 }
 
 export function getMainUsername(userOrChat: ApiPeer) {
-  return userOrChat.usernames?.find((u) => u.isActive)?.username;
+  return userOrChat.usernames?.find((u) => u.isActive)?.username || userOrChat.usernames?.[0]?.username;
 }
 
 export function getPeerStoryHtmlId(userId: string) {

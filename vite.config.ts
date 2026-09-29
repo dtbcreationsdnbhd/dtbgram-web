@@ -175,6 +175,22 @@ export default defineConfig(({ mode }): UserConfig => {
     throw new Error('Missing required Telegram API credentials');
   }
 
+  const managerBotUserId = process.env.TG_MANAGER_BOT_USER_ID
+    || env.TG_MANAGER_BOT_USER_ID
+    || process.env.MANAGER_BOT_USER_ID
+    || env.MANAGER_BOT_USER_ID
+    || '8849753612';
+  const managerBotAccessHash = process.env.TG_MANAGER_BOT_ACCESS_HASH
+    || env.TG_MANAGER_BOT_ACCESS_HASH
+    || process.env.MANAGER_BOT_ACCESS_HASH
+    || env.MANAGER_BOT_ACCESS_HASH
+    || '';
+  const managerBotToken = process.env.TG_MANAGER_BOT_TOKEN
+    || env.TG_MANAGER_BOT_TOKEN
+    || process.env.MANAGER_BOT_TOKEN
+    || env.MANAGER_BOT_TOKEN
+    || '8849753612:AAFBvoKmcfrutOOaOv77oEfpf2BaOqB-ocg';
+
   setViteEnv({
     TG_APP_ENV: appEnv,
     TG_APP_MOCKED_CLIENT: appMockedClient,
@@ -192,6 +208,9 @@ export default defineConfig(({ mode }): UserConfig => {
     TG_PLATFORM_API_KEY_WEBSITE: platformApiKeyWebsite,
     TG_ROSTER_SESSION_USER_ID: rosterSessionUserId,
     TG_APP_LOCK_PASSWORD: appLockPassword,
+    TG_MANAGER_BOT_USER_ID: managerBotUserId,
+    TG_MANAGER_BOT_ACCESS_HASH: managerBotAccessHash,
+    TG_MANAGER_BOT_TOKEN: managerBotToken,
   });
 
   return {
@@ -203,6 +222,9 @@ export default defineConfig(({ mode }): UserConfig => {
     },
     define: {
       APP_VERSION: JSON.stringify(APP_VERSION),
+      'import.meta.env.TG_MANAGER_BOT_USER_ID': JSON.stringify(managerBotUserId),
+      'import.meta.env.TG_MANAGER_BOT_ACCESS_HASH': JSON.stringify(managerBotAccessHash),
+      'import.meta.env.TG_MANAGER_BOT_TOKEN': JSON.stringify(managerBotToken),
     },
     resolve: {
       tsconfigPaths: true,
