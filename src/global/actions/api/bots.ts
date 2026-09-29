@@ -15,8 +15,11 @@ import { ManagementProgress } from '../../../types';
 import {
   GENERAL_REFETCH_INTERVAL, MANAGER_BOT_TOKEN, MANAGER_BOT_USER_ID,
 } from '../../../config';
+import { openWebAppExternally } from '../../../util/browser/openWebAppExternally';
 import {
   isTelegramInternalWebAppUrl,
+  shouldOpenWebAppInBrowser,
+  stripTelegramWebAppParams,
 } from '../../../util/browser/openWebAppTopLevel';
 import { copyTextToClipboard } from '../../../util/clipboard';
 import { getUsernameFromDeepLink } from '../../../util/deepLinkParser';
@@ -112,6 +115,31 @@ function tryOpenWebAppTopLevel(
 
   actions.openBotFatherModal({ view, tabId });
   return true;
+}
+
+function tryOpenWebAppInBrowser(url: string | undefined, tabId: number): boolean {
+  if (!url || !shouldOpenWebAppInBrowser(url)) return false;
+
+  const result = openWebAppExternally(stripTelegramWebAppParams(url));
+  if (result === 'failed') {
+    getActions().showNotification({
+      message: { key: 'WebAppOpenExternallyFailed' },
+      tabId,
+    });
+  }
+  return true;
+}
+
+function tryHandleNonIframeWebApp(
+  actions: {
+    openBotFatherModal: AnyToVoidFunction;
+  },
+  url: string | undefined,
+  tabId: number,
+): boolean {
+  if (!url) return false;
+  if (tryOpenWebAppTopLevel(actions, url, tabId)) return true;
+  return tryOpenWebAppInBrowser(url, tabId);
 }
 
 addActionHandler('clickSuggestedMessageButton', (global, actions, payload): ActionReturnType => {
@@ -688,10 +716,11 @@ addActionHandler('requestSimpleWebView', async (global, actions, payload): Promi
 
   if (checkIfOpenOrActivate(global, botId, tabId, url)) return;
 
-  if (botId === MANAGER_BOT_USER_ID || (url && tryOpenWebAppTopLevel(actions, url, tabId))) {
+  if (botId === MANAGER_BOT_USER_ID) {
     actions.openBotFatherModal({ view: 'home', tabId });
     return;
   }
+  if (url && tryHandleNonIframeWebApp(actions, url, tabId)) return;
 
   const bot = selectUser(global, botId);
   if (!bot) return;
@@ -725,7 +754,7 @@ addActionHandler('requestSimpleWebView', async (global, actions, payload): Promi
 
   const { url: webViewUrl, isSameOrigin } = result;
 
-  if (tryOpenWebAppTopLevel(actions, webViewUrl, tabId)) return;
+  if (tryHandleNonIframeWebApp(actions, webViewUrl, tabId)) return;
 
   global = getGlobal();
   const newActiveApp: WebApp = {
@@ -748,10 +777,11 @@ addActionHandler('requestWebView', async (global, actions, payload): Promise<voi
 
   if (checkIfOpenOrActivate(global, botId, tabId, url)) return;
 
-  if (botId === MANAGER_BOT_USER_ID || (url && tryOpenWebAppTopLevel(actions, url, tabId))) {
+  if (botId === MANAGER_BOT_USER_ID) {
     actions.openBotFatherModal({ view: 'home', tabId });
     return;
   }
+  if (url && tryHandleNonIframeWebApp(actions, url, tabId)) return;
 
   const bot = selectUser(global, botId);
   if (!bot) return;
@@ -803,7 +833,7 @@ addActionHandler('requestWebView', async (global, actions, payload): Promise<voi
     url: webViewUrl, queryId, isFullScreen, isSameOrigin,
   } = result;
 
-  if (tryOpenWebAppTopLevel(actions, webViewUrl, tabId)) return;
+  if (tryHandleNonIframeWebApp(actions, webViewUrl, tabId)) return;
 
   global = getGlobal();
   const newActiveApp: WebApp = {
@@ -833,10 +863,11 @@ addActionHandler('openChatInviteWebView', (global, actions, payload): ActionRetu
 
   if (checkIfOpenOrActivate(global, botId, tabId, url)) return;
 
-  if (botId === MANAGER_BOT_USER_ID || (url && tryOpenWebAppTopLevel(actions, url, tabId))) {
+  if (botId === MANAGER_BOT_USER_ID) {
     actions.openBotFatherModal({ view: 'home', tabId });
     return;
   }
+  if (url && tryHandleNonIframeWebApp(actions, url, tabId)) return;
 
   const bot = selectUser(global, botId);
   if (!bot) return;
@@ -856,7 +887,7 @@ addActionHandler('openChatInviteWebView', (global, actions, payload): ActionRetu
     return;
   }
 
-  if (tryOpenWebAppTopLevel(actions, url, tabId)) return;
+  if (tryHandleNonIframeWebApp(actions, url, tabId)) return;
 
   const newActiveApp: WebApp = {
     url,
@@ -984,7 +1015,7 @@ addActionHandler('requestMainWebView', async (global, actions, payload): Promise
     url: webViewUrl, queryId, isFullscreen, isSameOrigin,
   } = result;
 
-  if (tryOpenWebAppTopLevel(actions, webViewUrl, tabId)) return;
+  if (tryHandleNonIframeWebApp(actions, webViewUrl, tabId)) return;
 
   global = getGlobal();
   const newActiveApp: WebApp = {
@@ -1142,7 +1173,7 @@ addActionHandler('requestAppWebView', async (global, actions, payload): Promise<
 
   const { url, isFullscreen, isSameOrigin } = result;
 
-  if (tryOpenWebAppTopLevel(actions, url, tabId)) return;
+  if (tryHandleNonIframeWebApp(actions, url, tabId)) return;
 
   global = getGlobal();
 
@@ -1302,10 +1333,11 @@ addActionHandler('callAttachBot', (global, actions, payload): ActionReturnType =
 
   if ('chatId' in payload) {
     const { chatId, threadId = MAIN_THREAD_ID, url } = payload;
-    if (chatId === MANAGER_BOT_USER_ID || (url && tryOpenWebAppTopLevel(actions, url, tabId))) {
+    if (chatId === MANAGER_BOT_USER_ID) {
       actions.openBotFatherModal({ view: 'home', tabId });
       return undefined;
     }
+    if (url && tryHandleNonIframeWebApp(actions, url, tabId)) return undefined;
     actions.openThread({ chatId, threadId, tabId });
     actions.requestWebView({
       url,
@@ -2406,6 +2438,40 @@ function setBotFatherMiniAppSaving(tabId: number, isSavingMiniApp?: true) {
   setGlobal(global);
 }
 
+function applyBotFatherMenuButtonResult(
+  tabId: number,
+  selectedBotId: string,
+  menuButton: { isEnabled: boolean; url?: string; text?: string },
+) {
+  let global = getGlobal();
+  const modal = selectTabState(global, tabId).botFatherModal;
+  if (modal) {
+    global = updateTabState(global, {
+      botFatherModal: {
+        ...modal,
+        view: 'miniApps',
+        menuButtonIsEnabled: menuButton.isEnabled,
+        menuButtonUrl: menuButton.isEnabled ? menuButton.url : '',
+        menuButtonText: menuButton.isEnabled ? menuButton.text : '',
+      },
+    }, tabId);
+  }
+
+  const savedFullInfo = selectUserFullInfo(global, selectedBotId);
+  if (savedFullInfo?.botInfo) {
+    global = updateUserFullInfo(global, selectedBotId, {
+      botInfo: {
+        ...savedFullInfo.botInfo,
+        menuButton: menuButton.isEnabled && menuButton.url
+          ? { type: 'webApp', text: menuButton.text || 'Open', url: menuButton.url }
+          : { type: 'commands' },
+      },
+    });
+  }
+
+  setGlobal(global);
+}
+
 addActionHandler('saveBotFatherMenuButton', async (global, actions, payload): Promise<void> => {
   const { url, text, tabId = getCurrentTabId() } = payload;
   const modal = selectTabState(global, tabId).botFatherModal;
@@ -2434,22 +2500,12 @@ addActionHandler('saveBotFatherMenuButton', async (global, actions, payload): Pr
     return;
   }
 
-  // Optimistic update: patch menuButton immediately so UI reflects the new values
-  // on return without waiting for loadFullUser to propagate.
-  global = getGlobal();
-  const savedFullInfo = selectUserFullInfo(global, modal.selectedBotId);
-  if (savedFullInfo?.botInfo) {
-    global = updateUserFullInfo(global, modal.selectedBotId, {
-      botInfo: {
-        ...savedFullInfo.botInfo,
-        menuButton: { type: 'webApp', text: text?.trim() || 'Open', url: url.trim() },
-      },
-    });
-    setGlobal(global);
-  }
-
+  applyBotFatherMenuButtonResult(tabId, modal.selectedBotId, {
+    isEnabled: true,
+    url: url.trim(),
+    text: text?.trim() || 'Open',
+  });
   actions.loadFullUser({ userId: modal.selectedBotId });
-  actions.setBotFatherModalView({ view: 'miniApps', tabId });
   actions.showNotification({
     message: { key: 'BotFatherInfoUpdated' },
     tabId,
@@ -2484,21 +2540,8 @@ addActionHandler('disableBotFatherMenuButton', async (global, actions, payload):
     return;
   }
 
-  // Optimistic update: clear the webApp button so the hub shows it as disabled.
-  global = getGlobal();
-  const disabledFullInfo = selectUserFullInfo(global, modal.selectedBotId);
-  if (disabledFullInfo?.botInfo) {
-    global = updateUserFullInfo(global, modal.selectedBotId, {
-      botInfo: {
-        ...disabledFullInfo.botInfo,
-        menuButton: { type: 'commands' },
-      },
-    });
-    setGlobal(global);
-  }
-
+  applyBotFatherMenuButtonResult(tabId, modal.selectedBotId, { isEnabled: false });
   actions.loadFullUser({ userId: modal.selectedBotId });
-  actions.setBotFatherModalView({ view: 'miniApps', tabId });
   actions.showNotification({
     message: { key: 'BotFatherInfoUpdated' },
     tabId,

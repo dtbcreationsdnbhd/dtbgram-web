@@ -19,6 +19,7 @@ import { callApi } from '../../../api/gramjs';
 import useFlag from '../../../hooks/useFlag';
 import useLang from '../../../hooks/useLang';
 import useLastCallback from '../../../hooks/useLastCallback';
+import { useStateRef } from '../../../hooks/useStateRef';
 
 import Avatar from '../../common/Avatar';
 import Icon from '../../common/icons/Icon';
@@ -117,6 +118,9 @@ type MiniAppsScreenProps = {
   editingShortName?: string;
   mainAppUrl?: string;
   mainAppLaunchMode?: LaunchMode;
+  menuButtonIsEnabled?: boolean;
+  menuButtonUrl?: string;
+  menuButtonText?: string;
 };
 
 const BotFatherHomeScreen = ({
@@ -1333,7 +1337,11 @@ const BotFatherEditCommandScreen = ({
 };
 
 const BotFatherMiniAppsScreen = ({
-  bot, fullInfo, directLinks: modalDirectLinks, isSavingMiniApp,
+  bot,
+  fullInfo,
+  directLinks: modalDirectLinks,
+  isSavingMiniApp,
+  menuButtonIsEnabled,
 }: MiniAppsScreenProps) => {
   const {
     setBotFatherModalView, showNotification, loadBotFatherDirectLinks, deleteBotFatherDirectLink,
@@ -1342,20 +1350,20 @@ const BotFatherMiniAppsScreen = ({
   const lang = useLang();
   const botUsername = getMainUsername(bot) || 'bot';
 
-  const initialMenuButtonEnabled = fullInfo?.botInfo?.menuButton?.type === 'webApp';
   const initialMainAppEnabled = Boolean(bot.hasMainMiniApp || fullInfo?.botInfo?.appSettings);
 
   const [hasSameOriginRestriction, setHasSameOriginRestriction] = useState(false);
-  const [isMenuButtonEnabled, setIsMenuButtonEnabled] = useState(initialMenuButtonEnabled);
+  const [isMenuButtonEnabled, setIsMenuButtonEnabled] = useState(Boolean(menuButtonIsEnabled));
+  const menuButtonEnabledRef = useStateRef(menuButtonIsEnabled);
   const [isMainAppEnabled, setIsMainAppEnabled] = useState(initialMainAppEnabled);
   const [directLinks, setDirectLinks] = useState<BotFatherDirectLinkItem[]>(modalDirectLinks || []);
   const [isLoadingLinks, setIsLoadingLinks] = useState(!modalDirectLinks?.length);
 
   useEffect(() => {
-    if (fullInfo?.botInfo?.menuButton) {
-      setIsMenuButtonEnabled(fullInfo.botInfo.menuButton.type === 'webApp');
+    if (menuButtonIsEnabled !== undefined) {
+      setIsMenuButtonEnabled(menuButtonIsEnabled);
     }
-  }, [fullInfo?.botInfo?.menuButton]);
+  }, [menuButtonIsEnabled]);
 
   useEffect(() => {
     setIsMainAppEnabled(Boolean(bot.hasMainMiniApp || fullInfo?.botInfo?.appSettings));
@@ -1380,8 +1388,8 @@ const BotFatherMiniAppsScreen = ({
 
       if (isCancelled) return;
 
-      if (menuButtonRes) {
-        setIsMenuButtonEnabled(menuButtonRes.isEnabled);
+      if (menuButtonEnabledRef.current === undefined && menuButtonRes) {
+        setIsMenuButtonEnabled(Boolean(menuButtonRes.isEnabled && menuButtonRes.url));
       }
       if (accessSettingsRes) {
         setHasSameOriginRestriction(accessSettingsRes.isRestricted);
@@ -1612,7 +1620,9 @@ const BotFatherMiniAppsScreen = ({
   );
 };
 
-const BotFatherMenuButtonScreen = ({ bot, fullInfo, isSavingMiniApp }: MiniAppsScreenProps) => {
+const BotFatherMenuButtonScreen = ({
+  bot, fullInfo, isSavingMiniApp, menuButtonIsEnabled, menuButtonUrl, menuButtonText,
+}: MiniAppsScreenProps) => {
   const {
     showNotification, saveBotFatherMenuButton, disableBotFatherMenuButton,
   } = getActions();
@@ -1622,32 +1632,43 @@ const BotFatherMenuButtonScreen = ({ bot, fullInfo, isSavingMiniApp }: MiniAppsS
     ? fullInfo.botInfo.menuButton
     : undefined;
 
-  const [url, setUrl] = useState(webAppMenuButton?.url || '');
-  const [title, setTitle] = useState(webAppMenuButton?.text || '');
-  const [hasCustomButton, setHasCustomButton] = useState(Boolean(webAppMenuButton));
+  const isMenuButtonDisabled = menuButtonIsEnabled === false;
+
+  const [url, setUrl] = useState(
+    isMenuButtonDisabled ? '' : (menuButtonUrl || webAppMenuButton?.url || ''),
+  );
+  const [title, setTitle] = useState(
+    isMenuButtonDisabled ? '' : (menuButtonText || webAppMenuButton?.text || ''),
+  );
+  const [hasCustomButton, setHasCustomButton] = useState(
+    isMenuButtonDisabled ? false : (menuButtonIsEnabled ?? Boolean(webAppMenuButton)),
+  );
 
   useEffect(() => {
-    if (webAppMenuButton) {
-      if (webAppMenuButton.url) setUrl(webAppMenuButton.url);
-      if (webAppMenuButton.text) setTitle(webAppMenuButton.text);
-      setHasCustomButton(true);
+    if (menuButtonIsEnabled === false) {
+      return undefined;
     }
-  }, [webAppMenuButton]);
 
-  useEffect(() => {
     let isCancelled = false;
 
     async function loadMenuButton() {
       const res = await callApi('fetchBotMenuButton', { bot }).catch(() => undefined);
-      if (isCancelled || !res) return;
+      if (isCancelled) return;
 
-      if (res.url) {
+      if (res?.isEnabled && res.url) {
         setUrl(res.url);
+        if (res.text) setTitle(res.text);
+        setHasCustomButton(true);
+        return;
       }
-      if (res.text) {
-        setTitle(res.text);
+
+      if (menuButtonIsEnabled === true) {
+        return;
       }
-      setHasCustomButton(Boolean(res.isEnabled));
+
+      setUrl('');
+      setTitle('');
+      setHasCustomButton(false);
     }
 
     void loadMenuButton();
@@ -1655,7 +1676,7 @@ const BotFatherMenuButtonScreen = ({ bot, fullInfo, isSavingMiniApp }: MiniAppsS
     return () => {
       isCancelled = true;
     };
-  }, [bot]);
+  }, [bot, menuButtonIsEnabled]);
 
   const handleUrlChange = useLastCallback((e: ChangeEvent<HTMLInputElement>) => {
     setUrl(e.target.value);

@@ -685,6 +685,9 @@ export type TabState = {
     editingDirectLinkShortName?: string;
     mainAppUrl?: string;
     mainAppLaunchMode?: 'compact' | 'fullsize' | 'fullscreen';
+    menuButtonIsEnabled?: boolean;
+    menuButtonUrl?: string;
+    menuButtonText?: string;
     directLinks?: Array<{
       shortName: string;
       title: string;

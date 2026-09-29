@@ -185,8 +185,8 @@ const useWebAppFrame = (
       const data = JSON.parse(event.data) as WebAppInboundEvent;
       const { eventType, eventData } = data;
 
-      // Any Mini App bridge traffic means the page loaded and can talk to the client.
-      if (eventType === 'web_app_ready' || eventType === 'iframe_ready' || eventType.startsWith('web_app_')) {
+      // Real Mini Apps announce ready; ignore unrelated iframe postMessage.
+      if (eventType === 'web_app_ready' || eventType === 'iframe_ready') {
         onHandshake?.();
       }
 

@@ -1038,6 +1038,48 @@ export async function resetBotCommands({
   }
 }
 
+type BotApiMenuButtonResult = {
+  type: 'custom' | 'commands' | 'default';
+  text?: string;
+  url?: string;
+  isEnabled: boolean;
+};
+
+async function fetchChatMenuButtonViaApi(token: string): Promise<BotApiMenuButtonResult | undefined> {
+  try {
+    const response = await fetch(`${BOT_API_BASE_URL}${token}/getChatMenuButton`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const data = await response.json() as {
+      ok?: boolean;
+      result?: {
+        type?: string;
+        text?: string;
+        web_app?: { url?: string };
+      };
+    };
+    if (!data.ok || !data.result) return undefined;
+
+    if (data.result.type === 'web_app' && data.result.web_app?.url) {
+      return {
+        type: 'custom',
+        text: data.result.text,
+        url: data.result.web_app.url,
+        isEnabled: true,
+      };
+    }
+
+    return {
+      type: data.result.type === 'commands' ? 'commands' : 'default',
+      isEnabled: false,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 // MTProto `bots.SetBotMenuButton` requires bot-auth. For owned bots we use
 // the Bot HTTP API (`/setChatMenuButton`) from the owner's user session via the exported token.
 export async function setBotMenuButtonViaApi({
@@ -1051,7 +1093,7 @@ export async function setBotMenuButtonViaApi({
 }) {
   const menuButton = url
     ? { type: 'web_app', text: text || 'Open', web_app: { url } }
-    : { type: 'default' };
+    : { type: 'commands' };
   try {
     const response = await fetch(`${BOT_API_BASE_URL}${token}/setChatMenuButton`, {
       method: 'POST',
@@ -1326,25 +1368,14 @@ export async function fetchBotMenuButton({
 }: {
   bot: ApiUser;
 }) {
-  const result = await invokeRequest(new GramJs.bots.GetBotMenuButton({
-    userId: buildInputUser(bot.id, bot.accessHash),
-  }));
-
-  if (!result) return undefined;
-
-  if (result instanceof GramJs.BotMenuButton) {
-    return {
-      type: 'custom' as const,
-      text: result.text,
-      url: result.url,
-      isEnabled: true,
-    };
+  const botUsername = bot.usernames?.find((u) => u.isActive)?.username
+    || bot.usernames?.[0]?.username;
+  const token = await exportBotToken({ bot, revoke: false, botUsername });
+  if (token) {
+    return fetchChatMenuButtonViaApi(token);
   }
 
-  return {
-    type: result instanceof GramJs.BotMenuButtonCommands ? ('commands' as const) : ('default' as const),
-    isEnabled: false,
-  };
+  return undefined;
 }
 
 export async function saveBotMenuButton({

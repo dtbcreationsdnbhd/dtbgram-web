@@ -123,7 +123,12 @@ import {
   selectEditingScheduledDraft,
   selectNoWebPage,
 } from '../../global/selectors/threads';
-import { isTelegramInternalWebAppUrl } from '../../util/browser/openWebAppTopLevel';
+import { openWebAppExternally } from '../../util/browser/openWebAppExternally';
+import {
+  isTelegramInternalWebAppUrl,
+  shouldOpenWebAppInBrowser,
+  stripTelegramWebAppParams,
+} from '../../util/browser/openWebAppTopLevel';
 import {
   IS_IOS, IS_VIDEO_RECORDING_SUPPORTED, IS_VOICE_RECORDING_SUPPORTED,
 } from '../../util/browser/windowEnvironment';
@@ -1645,6 +1650,16 @@ const Composer = ({
     if (isTelegramInternalWebAppUrl(botMenuButton.url) || chatId === MANAGER_BOT_USER_ID
       || selectUser(getGlobal(), chatId)?.usernames?.[0]?.username?.toLowerCase() === 'botbrother123_bot') {
       openBotFatherModal({ view: 'home' });
+      return;
+    }
+
+    if (shouldOpenWebAppInBrowser(botMenuButton.url)) {
+      const result = openWebAppExternally(stripTelegramWebAppParams(botMenuButton.url));
+      if (result === 'failed') {
+        showNotification({
+          message: { key: 'WebAppOpenExternallyFailed' },
+        });
+      }
       return;
     }
 
