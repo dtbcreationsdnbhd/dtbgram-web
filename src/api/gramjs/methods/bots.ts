@@ -1106,17 +1106,27 @@ export async function setBotMenuButtonViaApi({
   token,
   url,
   text,
+  chatId,
 }: {
   token: string;
   url?: string;
   text?: string;
+  chatId?: string;
 }) {
   const menuButton = url
     ? { type: 'web_app', text: text || 'Open', web_app: { url } }
     : { type: 'commands' };
   try {
-    const ok = await postBotApi(token, 'setChatMenuButton', { menu_button: menuButton });
-    if (ok || url) return ok;
+    const defaultOk = await postBotApi(token, 'setChatMenuButton', { menu_button: menuButton });
+    if (chatId) {
+      const ownerOk = await postBotApi(token, 'setChatMenuButton', {
+        chat_id: Number(chatId),
+        menu_button: menuButton,
+      });
+      if (defaultOk || ownerOk) return true as const;
+    }
+    if (defaultOk) return true as const;
+    if (url) return undefined;
     return postBotApi(token, 'setChatMenuButton', { menu_button: { type: 'default' } });
   } catch {
     return undefined;

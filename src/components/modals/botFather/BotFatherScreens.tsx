@@ -19,7 +19,6 @@ import { callApi } from '../../../api/gramjs';
 import useFlag from '../../../hooks/useFlag';
 import useLang from '../../../hooks/useLang';
 import useLastCallback from '../../../hooks/useLastCallback';
-import { useStateRef } from '../../../hooks/useStateRef';
 
 import Avatar from '../../common/Avatar';
 import Icon from '../../common/icons/Icon';
@@ -1358,7 +1357,6 @@ const BotFatherMiniAppsScreen = ({
 
   const [hasSameOriginRestriction, setHasSameOriginRestriction] = useState(false);
   const [isMenuButtonEnabled, setIsMenuButtonEnabled] = useState(Boolean(menuButtonIsEnabled));
-  const menuButtonEnabledRef = useStateRef(menuButtonIsEnabled);
   const [isMainAppEnabled, setIsMainAppEnabled] = useState(initialMainAppEnabled);
   const [directLinks, setDirectLinks] = useState<BotFatherDirectLinkItem[]>(modalDirectLinks || []);
   const [isLoadingLinks, setIsLoadingLinks] = useState(!modalDirectLinks?.length);
@@ -1392,7 +1390,7 @@ const BotFatherMiniAppsScreen = ({
 
       if (isCancelled) return;
 
-      if (menuButtonEnabledRef.current === undefined && menuButtonRes) {
+      if (menuButtonIsEnabled === undefined && menuButtonRes) {
         const isEnabled = Boolean(menuButtonRes.isEnabled && menuButtonRes.url);
         setIsMenuButtonEnabled(isEnabled);
         cacheBotFatherMenuButton({

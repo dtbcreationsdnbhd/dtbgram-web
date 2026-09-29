@@ -4,19 +4,20 @@ import { getActions, withGlobal } from '../../../global';
 import type { ApiChat, ApiUser } from '../../../api/types';
 import { StoryViewerOrigin } from '../../../types';
 
-import { MANAGER_BOT_USER_ID, UNMUTE_TIMESTAMP } from '../../../config';
-import { getMainUsername } from '../../../global/helpers';
+import { UNMUTE_TIMESTAMP } from '../../../config';
 import { getIsChatMuted } from '../../../global/helpers/notifications';
 import {
   selectChat,
   selectIsChatPinned,
   selectNotifyDefaults,
   selectNotifyException,
+  selectShouldShowBotOpenApp,
   selectTopicsInfo,
   selectUser,
 } from '../../../global/selectors';
 import { onDragEnter, onDragLeave } from '../../../util/dragNDropHandlers.ts';
 import { isUserId } from '../../../util/entities/ids';
+import { openStoredManagedMiniApp } from '../../../util/managedBotMenuButton';
 import { extractCurrentThemeParams } from '../../../util/themeStyle';
 
 import useChatContextActions from '../../../hooks/useChatContextActions';
@@ -46,6 +47,7 @@ type StateProps = {
   isPinned?: boolean;
   isMuted?: boolean;
   canChangeFolder?: boolean;
+  hasOpenAppButton?: boolean;
 };
 
 const LeftSearchResultChat = ({
@@ -57,10 +59,11 @@ const LeftSearchResultChat = ({
   isPinned,
   isMuted,
   canChangeFolder,
+  hasOpenAppButton,
   withOpenAppButton,
   onClick,
 }: OwnProps & StateProps) => {
-  const { requestMainWebView, updateChatMutedState, openQuickPreview } = getActions();
+  const { requestMainWebView, updateChatMutedState, openQuickPreview, callAttachBot } = getActions();
   const lang = useLang();
 
   const [isMuteModalOpen, openMuteModal, closeMuteModal] = useFlag();
@@ -105,6 +108,12 @@ const LeftSearchResultChat = ({
 
   const handleOpenApp = useLastCallback((e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
     e.stopPropagation();
+
+    if (openStoredManagedMiniApp(chatId, (url) => {
+      callAttachBot({ chatId, url });
+    })) {
+      return;
+    }
 
     const theme = extractCurrentThemeParams();
     requestMainWebView({
@@ -153,11 +162,7 @@ const LeftSearchResultChat = ({
           storyViewerOrigin={StoryViewerOrigin.SearchResult}
         />
       )}
-      {withOpenAppButton && (
-        user?.hasMainMiniApp
-        || user?.id === MANAGER_BOT_USER_ID
-        || (user && getMainUsername(user)?.toLowerCase() === 'botbrother123_bot')
-      ) && (
+      {withOpenAppButton && hasOpenAppButton && (
         <Button
           className="search-result-miniapp-button"
           pill
@@ -204,6 +209,7 @@ export default memo(withGlobal<OwnProps>(
       isMuted,
       canChangeFolder: Boolean(global.chatFolders.orderedIds?.length),
       listedTopicIds,
+      hasOpenAppButton: selectShouldShowBotOpenApp(global, user),
     };
   },
 )(LeftSearchResultChat));

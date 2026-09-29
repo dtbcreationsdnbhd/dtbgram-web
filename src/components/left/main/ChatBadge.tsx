@@ -9,6 +9,7 @@ import { selectTopicsInfo } from '../../../global/selectors';
 import { selectThreadReadState } from '../../../global/selectors/threads';
 import buildClassName from '../../../util/buildClassName';
 import { buildCollectionByCallback } from '../../../util/iteratees';
+import { openStoredManagedMiniApp } from '../../../util/managedBotMenuButton';
 import { getServerTime } from '../../../util/serverTime';
 import { isSignal } from '../../../util/signals';
 import { formatIntegerCompact } from '../../../util/textFormat';
@@ -61,7 +62,7 @@ const ChatBadge = ({
   transitionClassName,
   badgeClassName,
 }: OwnProps) => {
-  const { requestMainWebView } = getActions();
+  const { requestMainWebView, callAttachBot } = getActions();
 
   const lang = useLang();
 
@@ -165,6 +166,12 @@ const ChatBadge = ({
 
   const handleOpenApp = useLastCallback((e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
     e.stopPropagation();
+
+    if (openStoredManagedMiniApp(chat.id, (url) => {
+      callAttachBot({ chatId: chat.id, url });
+    })) {
+      return;
+    }
 
     const theme = extractCurrentThemeParams();
     requestMainWebView({

@@ -99,6 +99,7 @@ import {
   selectIsPremiumPurchaseBlocked,
   selectIsReactionPickerOpen,
   selectIsRightColumnShown,
+  selectManagedBotMenuButton,
   selectNewestMessageWithBotKeyboardButtons,
   selectNotifyDefaults,
   selectNotifyException,
@@ -1664,14 +1665,14 @@ const Composer = ({
     }
 
     const parsedLink = tryParseDeepLink(botMenuButton.url);
-
-    if (parsedLink?.type === 'publicUsernameOrBotLink' && parsedLink.appName) {
+    if (parsedLink) {
       processDeepLink(botMenuButton.url);
-    } else {
-      callAttachBot({
-        chatId, url: botMenuButton.url, threadId,
-      });
+      return;
     }
+
+    callAttachBot({
+      chatId, url: botMenuButton.url, threadId,
+    });
   });
 
   const handleActivateBotCommandMenu = useLastCallback(() => {
@@ -3258,7 +3259,7 @@ export default memo(withGlobal<OwnProps>(
           ? (userFullInfo?.botInfo?.menuButton?.type === 'webApp'
             ? userFullInfo.botInfo.menuButton
             : { type: 'webApp', text: 'Open', url: 'https://botbrother.telegram.org' })
-          : userFullInfo?.botInfo?.menuButton
+          : (selectManagedBotMenuButton(global, chatId) || userFullInfo?.botInfo?.menuButton)
       ),
       sendAsPeer,
       sendAsId,
