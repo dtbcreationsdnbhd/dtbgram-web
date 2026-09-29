@@ -660,8 +660,10 @@ export type TabState = {
   };
 
   botFatherModal?: {
-    view: 'home' | 'create' | 'manage' | 'editInfo' | 'commands' | 'newCommand' | 'editCommand' | 'miniApps';
+    view: 'home' | 'create' | 'manage' | 'editInfo' | 'commands' | 'newCommand' | 'editCommand' | 'miniApps'
+      | 'miniAppMenuButton' | 'miniAppMainApp' | 'miniAppDirectLink';
     adminedBotIds?: string[];
+    managerBotId?: string;
     botFatherId?: string;
     isLoading?: boolean;
     hasLoadError?: boolean;
@@ -670,6 +672,7 @@ export type TabState = {
     isRevokingToken?: boolean;
     isSaving?: boolean;
     isSavingCommands?: boolean;
+    isSavingMiniApp?: boolean;
     isDeletingBot?: boolean;
     isRunningManageCommand?: boolean;
     selectedBotId?: string;
@@ -679,6 +682,14 @@ export type TabState = {
     editAbout?: string;
     editDescription?: string;
     editingCommandIndex?: number;
+    editingDirectLinkShortName?: string;
+    mainAppUrl?: string;
+    mainAppLaunchMode?: 'compact' | 'fullsize' | 'fullscreen';
+    directLinks?: Array<{
+      shortName: string;
+      title: string;
+      description?: string;
+    }>;
   };
 
   confetti?: {

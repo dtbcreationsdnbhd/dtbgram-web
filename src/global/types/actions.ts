@@ -2020,14 +2020,17 @@ export interface ActionPayloads {
     param?: string;
   } & WithTabId;
   openBotFatherModal: ({
-    view?: 'home' | 'create' | 'manage' | 'editInfo' | 'commands' | 'newCommand' | 'editCommand' | 'miniApps';
+    view?: 'home' | 'create' | 'manage' | 'editInfo' | 'commands' | 'newCommand' | 'editCommand' | 'miniApps'
+      | 'miniAppMenuButton' | 'miniAppMainApp' | 'miniAppDirectLink';
     selectedBotId?: string;
   } & WithTabId) | undefined;
   closeBotFatherModal: WithTabId | undefined;
   setBotFatherModalView: {
-    view: 'home' | 'create' | 'manage' | 'editInfo' | 'commands' | 'newCommand' | 'editCommand' | 'miniApps';
+    view: 'home' | 'create' | 'manage' | 'editInfo' | 'commands' | 'newCommand' | 'editCommand' | 'miniApps'
+      | 'miniAppMenuButton' | 'miniAppMainApp' | 'miniAppDirectLink';
     selectedBotId?: string;
     editingCommandIndex?: number;
+    editingDirectLinkShortName?: string;
   } & WithTabId;
   loadAdminedBots: WithTabId | undefined;
   openBotFatherManagedBot: {
@@ -2046,11 +2049,34 @@ export interface ActionPayloads {
     name: string;
     username: string;
     about?: string;
+    description?: string;
     photo?: File;
   } & WithTabId;
   saveBotFatherCommands: {
     commands: Array<{ command: string; description: string }>;
   } & WithTabId;
+  saveBotFatherMenuButton: {
+    url: string;
+    text?: string;
+  } & WithTabId;
+  disableBotFatherMenuButton: WithTabId | undefined;
+  saveBotFatherMainApp: {
+    url: string;
+    launchMode?: 'compact' | 'fullsize' | 'fullscreen';
+  } & WithTabId;
+  disableBotFatherMainApp: WithTabId | undefined;
+  loadBotFatherMainApp: WithTabId | undefined;
+  createBotFatherDirectLink: {
+    url: string;
+    title: string;
+    description: string;
+    shortName: string;
+    photo?: File;
+  } & WithTabId;
+  deleteBotFatherDirectLink: {
+    shortName: string;
+  } & WithTabId;
+  loadBotFatherDirectLinks: WithTabId | undefined;
   deleteBotViaBotFather: WithTabId | undefined;
   runBotFatherManageCommand: {
     command: string;
