@@ -121,6 +121,7 @@ export const INITIAL_GLOBAL_STATE: GlobalState = {
   cacheVersion: 5,
   isInited: true,
   attachMenu: { bots: {} },
+  managedBotMenuButtonsById: {},
   passcode: {},
   twoFaSettings: {},
   isAppUpdateAvailable: false,

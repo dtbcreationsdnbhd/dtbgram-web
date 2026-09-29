@@ -24,9 +24,8 @@ import type { CommunityMember } from './hooks/useChatListEntry';
 import { MAIN_THREAD_ID } from '../../../api/types';
 import { StoryViewerOrigin, type TopicsInfo } from '../../../types';
 
-import { ALL_FOLDER_ID, MANAGER_BOT_USER_ID, UNMUTE_TIMESTAMP } from '../../../config';
+import { ALL_FOLDER_ID, UNMUTE_TIMESTAMP } from '../../../config';
 import {
-  getMainUsername,
   getPeerColorKey,
   groupStatefulContent,
   isChatCommunity,
@@ -51,6 +50,7 @@ import {
   selectPeer,
   selectPeerStory,
   selectSender,
+  selectShouldShowBotOpenApp,
   selectTabState,
   selectTopicFromMessage,
   selectTopicsInfo,
@@ -148,6 +148,7 @@ type StateProps = {
   orderedFolderIds?: number[];
   chatFoldersById?: Record<number, ApiChatFolder>;
   areTagsEnabled?: boolean;
+  hasOpenAppButton?: boolean;
 };
 
 const AUTO_DELETE_STORY_GAP_PERCENT = 15;
@@ -194,6 +195,7 @@ const Chat: FC<OwnProps & StateProps> = ({
   orderedFolderIds,
   chatFoldersById,
   areTagsEnabled,
+  hasOpenAppButton,
   withTags,
   noCommunityChevron,
   isInCommunityPanel,
@@ -573,11 +575,7 @@ const Chat: FC<OwnProps & StateProps> = ({
               isPinned={isPinned}
               isMuted={isMuted}
               isSavedDialog={isSavedDialog}
-              hasMiniApp={Boolean(
-                user?.hasMainMiniApp
-                || user?.id === MANAGER_BOT_USER_ID
-                || (user && getMainUsername(user)?.toLowerCase() === 'botbrother123_bot'),
-              )}
+              hasMiniApp={hasOpenAppButton}
               forceUnreadCount={communityUnreadCount}
               isSelected={isSelected}
               transitionClassName="chat-badge-transition"
@@ -767,6 +765,7 @@ export default memo(withGlobal<OwnProps>(
       orderedFolderIds: global.chatFolders.orderedIds,
       chatFoldersById: global.chatFolders.byId,
       areTagsEnabled: areTagsEnabled && isPremium,
+      hasOpenAppButton: selectShouldShowBotOpenApp(global, user),
     };
   },
 )(Chat));

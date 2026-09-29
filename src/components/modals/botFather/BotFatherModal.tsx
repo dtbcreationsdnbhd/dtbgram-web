@@ -3,6 +3,7 @@ import { getActions, withGlobal } from '../../../global';
 
 import type { ApiBotCommand, ApiUser, ApiUserFullInfo } from '../../../api/types';
 import type { TabState } from '../../../global/types';
+import type { StoredManagedBotMenuButton } from '../../../util/managedBotMenuButton';
 
 import { MANAGER_BOT_USER_ID } from '../../../config';
 import { getUserFullName } from '../../../global/helpers';
@@ -44,6 +45,7 @@ type StateProps = {
   managerBot?: ApiUser;
   selectedBotCommands?: ApiBotCommand[];
   selectedBotFullInfo?: ApiUserFullInfo;
+  managedMenuButton?: StoredManagedBotMenuButton;
 };
 
 const BotFatherModal = ({
@@ -53,6 +55,7 @@ const BotFatherModal = ({
   managerBot,
   selectedBotCommands,
   selectedBotFullInfo,
+  managedMenuButton,
 }: OwnProps & StateProps) => {
   const {
     closeBotFatherModal,
@@ -161,6 +164,14 @@ const BotFatherModal = ({
   }
 
   function renderScreen(state: NonNullable<TabState['botFatherModal']>) {
+    const isManagedMenuEnabled = state.menuButtonIsEnabled ?? managedMenuButton?.isEnabled;
+    const managedMenuUrl = isManagedMenuEnabled === false
+      ? ''
+      : (state.menuButtonUrl || managedMenuButton?.url);
+    const managedMenuText = isManagedMenuEnabled === false
+      ? ''
+      : (state.menuButtonText || managedMenuButton?.text);
+
     switch (state.view) {
       case 'create':
         return <CreateScreen isCreating={state.isCreating} createError={state.createError} />;
@@ -209,7 +220,7 @@ const BotFatherModal = ({
             fullInfo={selectedBotFullInfo}
             directLinks={state.directLinks}
             isSavingMiniApp={state.isSavingMiniApp}
-            menuButtonIsEnabled={state.menuButtonIsEnabled}
+            menuButtonIsEnabled={isManagedMenuEnabled}
           />
         ) : undefined;
       case 'miniAppMenuButton':
@@ -218,9 +229,9 @@ const BotFatherModal = ({
             bot={selectedBot}
             fullInfo={selectedBotFullInfo}
             isSavingMiniApp={state.isSavingMiniApp}
-            menuButtonIsEnabled={state.menuButtonIsEnabled}
-            menuButtonUrl={state.menuButtonUrl}
-            menuButtonText={state.menuButtonText}
+            menuButtonIsEnabled={isManagedMenuEnabled}
+            menuButtonUrl={managedMenuUrl}
+            menuButtonText={managedMenuText}
           />
         ) : undefined;
       case 'miniAppMainApp':
@@ -283,5 +294,6 @@ export default memo(withGlobal<OwnProps>((global, { modal }): Complete<StateProp
       ? selectUserFullInfo(global, selectedBotId)?.botInfo?.commands
       : undefined,
     selectedBotFullInfo: selectedBotId ? selectUserFullInfo(global, selectedBotId) : undefined,
+    managedMenuButton: selectedBotId ? global.managedBotMenuButtonsById?.[selectedBotId] : undefined,
   };
 })(BotFatherModal));

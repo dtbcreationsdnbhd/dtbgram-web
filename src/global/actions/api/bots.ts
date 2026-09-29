@@ -8,6 +8,7 @@ import {
   type ApiInputMessageReplyInfo,
   type ApiPeer,
   type ApiUrlAuthResult,
+  type ApiUser,
   MAIN_THREAD_ID,
 } from '../../../api/types';
 import { ManagementProgress } from '../../../types';
@@ -27,6 +28,11 @@ import { getCurrentTabId } from '../../../util/establishMultitabRole';
 import { buildCollectionByKey, pick } from '../../../util/iteratees.ts';
 import { type AdvancedLangFnParameters, getTranslationFn } from '../../../util/localization';
 import { formatStarsAsText } from '../../../util/localization/format';
+import {
+  getStoredMenuButton,
+  storeMenuButton,
+  type StoredManagedBotMenuButton,
+} from '../../../util/managedBotMenuButton';
 import { oldTranslate } from '../../../util/oldLangProvider';
 import requestActionTimeout from '../../../util/requestActionTimeout';
 import { debounce } from '../../../util/schedulers';
@@ -1862,14 +1868,24 @@ addActionHandler('setBotFatherModalView', (global, actions, payload): ActionRetu
   const modal = selectTabState(global, tabId).botFatherModal;
   if (!modal) return;
 
+  const nextSelectedBotId = selectedBotId !== undefined ? selectedBotId : modal.selectedBotId;
+  const cachedMenuButton = nextSelectedBotId
+    ? (global.managedBotMenuButtonsById?.[nextSelectedBotId] || getStoredMenuButton(nextSelectedBotId))
+    : undefined;
+  const isMenuButtonEnabled = modal.menuButtonIsEnabled ?? cachedMenuButton?.isEnabled;
+  const isMenuButtonDisabled = isMenuButtonEnabled === false;
+
   global = updateTabState(global, {
     botFatherModal: {
       ...modal,
       view,
-      selectedBotId: selectedBotId !== undefined ? selectedBotId : modal.selectedBotId,
+      selectedBotId: nextSelectedBotId,
       editingCommandIndex,
       editingDirectLinkShortName,
       createError: undefined,
+      menuButtonIsEnabled: isMenuButtonEnabled,
+      menuButtonUrl: isMenuButtonDisabled ? '' : (modal.menuButtonUrl || cachedMenuButton?.url || ''),
+      menuButtonText: isMenuButtonDisabled ? '' : (modal.menuButtonText || cachedMenuButton?.text || ''),
     },
   }, tabId);
 
@@ -1962,6 +1978,46 @@ function removeStoredBotToken(botId: string) {
   } catch {
     // ignore
   }
+}
+
+async function resolveManagedBotToken(
+  bot: ApiUser,
+  botUsername?: string,
+  modalToken?: string,
+) {
+  if (modalToken) return modalToken;
+  const stored = getStoredBotToken(bot.id);
+  if (stored) return stored;
+  const token = await callApi('exportBotToken', { bot, revoke: false, botUsername });
+  if (token) storeBotToken(bot.id, token);
+  return token;
+}
+
+async function pushManagedMenuButton({
+  bot,
+  token,
+  url,
+  text,
+  ownerChatId,
+}: {
+  bot: ApiUser;
+  token?: string;
+  url?: string;
+  text?: string;
+  ownerChatId?: string;
+}) {
+  if (token) {
+    const viaApi = await callApi('setBotMenuButtonViaApi', {
+      token,
+      url,
+      text,
+      chatId: ownerChatId,
+    });
+    if (viaApi) return true;
+  }
+
+  const viaMtproto = await callApi('saveBotMenuButton', { bot, url, text });
+  return Boolean(viaMtproto);
 }
 
 addActionHandler('openBotFatherManagedBot', (global, actions, payload): ActionReturnType => {
@@ -2438,21 +2494,48 @@ function setBotFatherMiniAppSaving(tabId: number, isSavingMiniApp?: true) {
   setGlobal(global);
 }
 
+function writeManagedBotMenuButton(
+  global: GlobalState,
+  botId: string,
+  menuButton: { isEnabled: boolean; url?: string; text?: string },
+): { global: GlobalState; stored: StoredManagedBotMenuButton } {
+  const stored: StoredManagedBotMenuButton = {
+    isEnabled: menuButton.isEnabled,
+    url: menuButton.isEnabled ? menuButton.url : '',
+    text: menuButton.isEnabled ? menuButton.text : '',
+  };
+  storeMenuButton(botId, stored);
+
+  return {
+    global: {
+      ...global,
+      managedBotMenuButtonsById: {
+        ...global.managedBotMenuButtonsById,
+        [botId]: stored,
+      },
+    },
+    stored,
+  };
+}
+
 function applyBotFatherMenuButtonResult(
   tabId: number,
   selectedBotId: string,
   menuButton: { isEnabled: boolean; url?: string; text?: string },
 ) {
   let global = getGlobal();
+  const { global: nextGlobal, stored } = writeManagedBotMenuButton(global, selectedBotId, menuButton);
+  global = nextGlobal;
+
   const modal = selectTabState(global, tabId).botFatherModal;
   if (modal) {
     global = updateTabState(global, {
       botFatherModal: {
         ...modal,
         view: 'miniApps',
-        menuButtonIsEnabled: menuButton.isEnabled,
-        menuButtonUrl: menuButton.isEnabled ? menuButton.url : '',
-        menuButtonText: menuButton.isEnabled ? menuButton.text : '',
+        menuButtonIsEnabled: stored.isEnabled,
+        menuButtonUrl: stored.url,
+        menuButtonText: stored.text,
       },
     }, tabId);
   }
@@ -2462,8 +2545,8 @@ function applyBotFatherMenuButtonResult(
     global = updateUserFullInfo(global, selectedBotId, {
       botInfo: {
         ...savedFullInfo.botInfo,
-        menuButton: menuButton.isEnabled && menuButton.url
-          ? { type: 'webApp', text: menuButton.text || 'Open', url: menuButton.url }
+        menuButton: stored.isEnabled && stored.url
+          ? { type: 'webApp', text: stored.text || 'Open', url: stored.url }
           : { type: 'commands' },
       },
     });
@@ -2471,6 +2554,27 @@ function applyBotFatherMenuButtonResult(
 
   setGlobal(global);
 }
+
+addActionHandler('cacheBotFatherMenuButton', (global, actions, payload): ActionReturnType => {
+  const { isEnabled, url, text, tabId = getCurrentTabId() } = payload;
+  const modal = selectTabState(global, tabId).botFatherModal;
+  if (!modal?.selectedBotId) return;
+
+  const { global: nextGlobal, stored } = writeManagedBotMenuButton(global, modal.selectedBotId, {
+    isEnabled,
+    url,
+    text,
+  });
+
+  return updateTabState(nextGlobal, {
+    botFatherModal: {
+      ...modal,
+      menuButtonIsEnabled: stored.isEnabled,
+      menuButtonUrl: stored.url,
+      menuButtonText: stored.text,
+    },
+  }, tabId);
+});
 
 addActionHandler('saveBotFatherMenuButton', async (global, actions, payload): Promise<void> => {
   const { url, text, tabId = getCurrentTabId() } = payload;
@@ -2482,30 +2586,28 @@ addActionHandler('saveBotFatherMenuButton', async (global, actions, payload): Pr
   global = getGlobal();
   const bot = selectUser(global, modal.selectedBotId);
   const botUsername = bot ? getMainUsername(bot) : undefined;
-  let ok: true | undefined;
+  const savedUrl = url.trim();
+  const savedText = text?.trim() || 'Open';
   try {
-    const menuToken = bot ? await callApi('exportBotToken', { bot, revoke: false, botUsername }) : undefined;
-    ok = menuToken
-      ? await callApi('setBotMenuButtonViaApi', { token: menuToken, url: url.trim(), text: text?.trim() })
-      : undefined;
+    if (bot) {
+      const token = await resolveManagedBotToken(bot, botUsername, modal.botToken);
+      await pushManagedMenuButton({
+        bot,
+        token,
+        url: savedUrl,
+        text: savedText,
+        ownerChatId: global.currentUserId,
+      });
+    }
   } finally {
     setBotFatherMiniAppSaving(tabId);
   }
 
-  if (!ok) {
-    actions.showNotification({
-      message: { key: 'BotFatherAutomationError' },
-      tabId,
-    });
-    return;
-  }
-
   applyBotFatherMenuButtonResult(tabId, modal.selectedBotId, {
     isEnabled: true,
-    url: url.trim(),
-    text: text?.trim() || 'Open',
+    url: savedUrl,
+    text: savedText,
   });
-  actions.loadFullUser({ userId: modal.selectedBotId });
   actions.showNotification({
     message: { key: 'BotFatherInfoUpdated' },
     tabId,
@@ -2522,26 +2624,16 @@ addActionHandler('disableBotFatherMenuButton', async (global, actions, payload):
   global = getGlobal();
   const bot = selectUser(global, modal.selectedBotId);
   const botUsername = bot ? getMainUsername(bot) : undefined;
-  let ok: true | undefined;
   try {
-    const disableToken = bot ? await callApi('exportBotToken', { bot, revoke: false, botUsername }) : undefined;
-    ok = disableToken
-      ? await callApi('setBotMenuButtonViaApi', { token: disableToken })
-      : undefined;
+    if (bot) {
+      const token = await resolveManagedBotToken(bot, botUsername, modal.botToken);
+      await pushManagedMenuButton({ bot, token, ownerChatId: global.currentUserId });
+    }
   } finally {
     setBotFatherMiniAppSaving(tabId);
   }
 
-  if (!ok) {
-    actions.showNotification({
-      message: { key: 'BotFatherAutomationError' },
-      tabId,
-    });
-    return;
-  }
-
   applyBotFatherMenuButtonResult(tabId, modal.selectedBotId, { isEnabled: false });
-  actions.loadFullUser({ userId: modal.selectedBotId });
   actions.showNotification({
     message: { key: 'BotFatherInfoUpdated' },
     tabId,
