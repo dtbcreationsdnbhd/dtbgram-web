@@ -2438,6 +2438,40 @@ function setBotFatherMiniAppSaving(tabId: number, isSavingMiniApp?: true) {
   setGlobal(global);
 }
 
+function applyBotFatherMenuButtonResult(
+  tabId: number,
+  selectedBotId: string,
+  menuButton: { isEnabled: boolean; url?: string; text?: string },
+) {
+  let global = getGlobal();
+  const modal = selectTabState(global, tabId).botFatherModal;
+  if (modal) {
+    global = updateTabState(global, {
+      botFatherModal: {
+        ...modal,
+        view: 'miniApps',
+        menuButtonIsEnabled: menuButton.isEnabled,
+        menuButtonUrl: menuButton.isEnabled ? menuButton.url : '',
+        menuButtonText: menuButton.isEnabled ? menuButton.text : '',
+      },
+    }, tabId);
+  }
+
+  const savedFullInfo = selectUserFullInfo(global, selectedBotId);
+  if (savedFullInfo?.botInfo) {
+    global = updateUserFullInfo(global, selectedBotId, {
+      botInfo: {
+        ...savedFullInfo.botInfo,
+        menuButton: menuButton.isEnabled && menuButton.url
+          ? { type: 'webApp', text: menuButton.text || 'Open', url: menuButton.url }
+          : { type: 'commands' },
+      },
+    });
+  }
+
+  setGlobal(global);
+}
+
 addActionHandler('saveBotFatherMenuButton', async (global, actions, payload): Promise<void> => {
   const { url, text, tabId = getCurrentTabId() } = payload;
   const modal = selectTabState(global, tabId).botFatherModal;
@@ -2466,22 +2500,12 @@ addActionHandler('saveBotFatherMenuButton', async (global, actions, payload): Pr
     return;
   }
 
-  // Optimistic update: patch menuButton immediately so UI reflects the new values
-  // on return without waiting for loadFullUser to propagate.
-  global = getGlobal();
-  const savedFullInfo = selectUserFullInfo(global, modal.selectedBotId);
-  if (savedFullInfo?.botInfo) {
-    global = updateUserFullInfo(global, modal.selectedBotId, {
-      botInfo: {
-        ...savedFullInfo.botInfo,
-        menuButton: { type: 'webApp', text: text?.trim() || 'Open', url: url.trim() },
-      },
-    });
-    setGlobal(global);
-  }
-
+  applyBotFatherMenuButtonResult(tabId, modal.selectedBotId, {
+    isEnabled: true,
+    url: url.trim(),
+    text: text?.trim() || 'Open',
+  });
   actions.loadFullUser({ userId: modal.selectedBotId });
-  actions.setBotFatherModalView({ view: 'miniApps', tabId });
   actions.showNotification({
     message: { key: 'BotFatherInfoUpdated' },
     tabId,
@@ -2516,21 +2540,8 @@ addActionHandler('disableBotFatherMenuButton', async (global, actions, payload):
     return;
   }
 
-  // Optimistic update: clear the webApp button so the hub shows it as disabled.
-  global = getGlobal();
-  const disabledFullInfo = selectUserFullInfo(global, modal.selectedBotId);
-  if (disabledFullInfo?.botInfo) {
-    global = updateUserFullInfo(global, modal.selectedBotId, {
-      botInfo: {
-        ...disabledFullInfo.botInfo,
-        menuButton: { type: 'commands' },
-      },
-    });
-    setGlobal(global);
-  }
-
+  applyBotFatherMenuButtonResult(tabId, modal.selectedBotId, { isEnabled: false });
   actions.loadFullUser({ userId: modal.selectedBotId });
-  actions.setBotFatherModalView({ view: 'miniApps', tabId });
   actions.showNotification({
     message: { key: 'BotFatherInfoUpdated' },
     tabId,

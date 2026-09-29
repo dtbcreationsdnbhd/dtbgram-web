@@ -209,6 +209,7 @@ const BotFatherModal = ({
             fullInfo={selectedBotFullInfo}
             directLinks={state.directLinks}
             isSavingMiniApp={state.isSavingMiniApp}
+            menuButtonIsEnabled={state.menuButtonIsEnabled}
           />
         ) : undefined;
       case 'miniAppMenuButton':
@@ -217,6 +218,9 @@ const BotFatherModal = ({
             bot={selectedBot}
             fullInfo={selectedBotFullInfo}
             isSavingMiniApp={state.isSavingMiniApp}
+            menuButtonIsEnabled={state.menuButtonIsEnabled}
+            menuButtonUrl={state.menuButtonUrl}
+            menuButtonText={state.menuButtonText}
           />
         ) : undefined;
       case 'miniAppMainApp':
