@@ -128,12 +128,12 @@ export const useMediaProps = ({
       return media.mediaSize || FALLBACK_DIMENSIONS;
     }
 
-    if (isPhoto) {
-      return getPhotoFullDimensions(media);
+    if (isPhoto && media) {
+      return 'sizes' in media ? getPhotoFullDimensions(media) : FALLBACK_DIMENSIONS;
     }
 
-    if (isVideo) {
-      return getVideoDimensions(media);
+    if (isVideo && media) {
+      return 'duration' in media ? getVideoDimensions(media) : FALLBACK_DIMENSIONS;
     }
 
     return FALLBACK_DIMENSIONS;

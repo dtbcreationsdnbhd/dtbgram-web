@@ -39,6 +39,7 @@ import {
   selectIsChatRestricted,
   selectNotifyDefaults,
   selectNotifyException,
+  selectShouldShowBotOpenApp,
   selectTopicLink,
   selectUser,
   selectUserFullInfo,
@@ -47,6 +48,7 @@ import { VTT_PROFILE_NOTE_COLLAPSE, VTT_PROFILE_NOTE_EXPAND } from '../../../uti
 import { ARE_CALLS_SUPPORTED } from '../../../util/browser/windowEnvironment';
 import buildClassName from '../../../util/buildClassName';
 import { copyTextToClipboard } from '../../../util/clipboard';
+import { openStoredManagedMiniApp } from '../../../util/managedBotMenuButton';
 import { formatPhoneNumberWithCode } from '../../../util/phoneNumber';
 import stopEvent from '../../../util/stopEvent';
 import { extractCurrentThemeParams } from '../../../util/themeStyle';
@@ -149,6 +151,7 @@ const ChatExtra = ({
     openMapModal,
     requestCollectibleInfo,
     requestMainWebView,
+    callAttachBot,
     toggleUserEmojiStatusPermission,
     toggleUserLocationPermission,
     requestNextManagementScreen,
@@ -347,6 +350,11 @@ const ChatExtra = ({
   const handleOpenApp = useLastCallback(() => {
     const botId = user?.id;
     if (!botId) {
+      return;
+    }
+    if (openStoredManagedMiniApp(botId, (url) => {
+      callAttachBot({ chatId: botId, url });
+    })) {
       return;
     }
     const theme = extractCurrentThemeParams();
@@ -746,7 +754,7 @@ export default memo(withGlobal<OwnProps>(
       ? selectChat(global, userFullInfo.personalChannelId)
       : undefined;
 
-    const hasMainMiniApp = user?.hasMainMiniApp;
+    const hasMainMiniApp = selectShouldShowBotOpenApp(global, user);
 
     return {
       phoneCodeList,

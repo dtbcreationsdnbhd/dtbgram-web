@@ -46,6 +46,7 @@ import { ApiMediaFormat, ApiMessageEntityTypes, MAIN_THREAD_ID } from '../../api
 import {
   BASE_EMOJI_KEYWORD_LANG,
   HEART_REACTION,
+  MANAGER_BOT_USER_ID,
   MAX_UPLOAD_FILEPART_SIZE,
   MIN_ROUND_VIDEO_RECORDING_TIME,
   ONE_TIME_MEDIA_TTL_SECONDS,
@@ -98,6 +99,7 @@ import {
   selectIsPremiumPurchaseBlocked,
   selectIsReactionPickerOpen,
   selectIsRightColumnShown,
+  selectManagedBotMenuButton,
   selectNewestMessageWithBotKeyboardButtons,
   selectNotifyDefaults,
   selectNotifyException,
@@ -122,6 +124,12 @@ import {
   selectEditingScheduledDraft,
   selectNoWebPage,
 } from '../../global/selectors/threads';
+import { openWebAppExternally } from '../../util/browser/openWebAppExternally';
+import {
+  isTelegramInternalWebAppUrl,
+  shouldOpenWebAppInBrowser,
+  stripTelegramWebAppParams,
+} from '../../util/browser/openWebAppTopLevel';
 import {
   IS_IOS, IS_VIDEO_RECORDING_SUPPORTED, IS_VOICE_RECORDING_SUPPORTED,
 } from '../../util/browser/windowEnvironment';
@@ -508,6 +516,7 @@ const Composer = ({
     setIsRichInputExpanded,
     setSettingOption,
     openPremiumModal,
+    openBotFatherModal,
   } = getActions();
 
   const oldLang = useOldLang();
@@ -1639,15 +1648,31 @@ const Composer = ({
       return;
     }
 
-    const parsedLink = tryParseDeepLink(botMenuButton.url);
-
-    if (parsedLink?.type === 'publicUsernameOrBotLink' && parsedLink.appName) {
-      processDeepLink(botMenuButton.url);
-    } else {
-      callAttachBot({
-        chatId, url: botMenuButton.url, threadId,
-      });
+    if (isTelegramInternalWebAppUrl(botMenuButton.url) || chatId === MANAGER_BOT_USER_ID
+      || selectUser(getGlobal(), chatId)?.usernames?.[0]?.username?.toLowerCase() === 'botbrother123_bot') {
+      openBotFatherModal({ view: 'home' });
+      return;
     }
+
+    if (shouldOpenWebAppInBrowser(botMenuButton.url)) {
+      const result = openWebAppExternally(stripTelegramWebAppParams(botMenuButton.url));
+      if (result === 'failed') {
+        showNotification({
+          message: { key: 'WebAppOpenExternallyFailed' },
+        });
+      }
+      return;
+    }
+
+    const parsedLink = tryParseDeepLink(botMenuButton.url);
+    if (parsedLink) {
+      processDeepLink(botMenuButton.url);
+      return;
+    }
+
+    callAttachBot({
+      chatId, url: botMenuButton.url, threadId,
+    });
   });
 
   const handleActivateBotCommandMenu = useLastCallback(() => {
@@ -3228,7 +3253,14 @@ export default memo(withGlobal<OwnProps>(
       inlineBots: tabState.inlineBots.byUsername,
       isInlineBotLoading: tabState.inlineBots.isLoading,
       botCommands: userFullInfo ? (userFullInfo.botInfo?.commands || false) : undefined,
-      botMenuButton: userFullInfo?.botInfo?.menuButton,
+      botMenuButton: (
+        (chatId === MANAGER_BOT_USER_ID
+          || selectUser(global, chatId)?.usernames?.[0]?.username?.toLowerCase() === 'botbrother123_bot')
+          ? (userFullInfo?.botInfo?.menuButton?.type === 'webApp'
+            ? userFullInfo.botInfo.menuButton
+            : { type: 'webApp', text: 'Open', url: 'https://botbrother.telegram.org' })
+          : (selectManagedBotMenuButton(global, chatId) || userFullInfo?.botInfo?.menuButton)
+      ),
       sendAsPeer,
       sendAsId,
       editingDraft,

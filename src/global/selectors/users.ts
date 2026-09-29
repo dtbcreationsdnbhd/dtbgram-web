@@ -5,10 +5,35 @@ import type {
 import type { BotAppPermissions } from '../../types';
 import type { GlobalState } from '../types';
 
-import { isUserBot } from '../helpers';
+import { MANAGER_BOT_USER_ID } from '../../config';
+import { getMainUsername, isUserBot } from '../helpers';
 
 export function selectUser<T extends GlobalState>(global: T, userId: string): ApiUser | undefined {
   return global.users.byId[userId];
+}
+
+export function selectManagedBotMenuButton<T extends GlobalState>(global: T, botId: string) {
+  const stored = global.managedBotMenuButtonsById?.[botId];
+  if (!stored?.isEnabled || !stored.url) {
+    return undefined;
+  }
+
+  return {
+    type: 'webApp' as const,
+    text: stored.text || 'Open',
+    url: stored.url,
+  };
+}
+
+export function selectHasManagedMiniApp<T extends GlobalState>(global: T, botId?: string) {
+  return Boolean(botId && selectManagedBotMenuButton(global, botId));
+}
+
+export function selectShouldShowBotOpenApp<T extends GlobalState>(global: T, user?: ApiUser) {
+  if (!user) return false;
+  if (user.hasMainMiniApp || user.id === MANAGER_BOT_USER_ID) return true;
+  if (getMainUsername(user)?.toLowerCase() === 'botbrother123_bot') return true;
+  return selectHasManagedMiniApp(global, user.id);
 }
 
 export function selectUserStatus<T extends GlobalState>(global: T, userId: string): ApiUserStatus | undefined {

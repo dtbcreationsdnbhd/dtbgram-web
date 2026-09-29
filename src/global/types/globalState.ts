@@ -147,6 +147,12 @@ export type GlobalState = {
     bots: Record<string, ApiAttachBot>;
   };
 
+  managedBotMenuButtonsById: Record<string, {
+    isEnabled: boolean;
+    url?: string;
+    text?: string;
+  }>;
+
   passcode: {
     isScreenLocked?: boolean;
     hasPasscode?: boolean;

@@ -36,6 +36,7 @@ import { getOrderedIds } from '../util/folderManager';
 import {
   compact, pick, pickTruthy, unique,
 } from '../util/iteratees';
+import { getAllStoredMenuButtons } from '../util/managedBotMenuButton';
 import { GLOBAL_STATE_CACHE_KEY } from '../util/multiaccount';
 import { encryptSession } from '../util/passcode';
 import { onBeforeUnload, throttle } from '../util/schedulers';
@@ -311,6 +312,14 @@ function unsafeMigrateCache(cached: GlobalState, initialState: GlobalState) {
   if (!cached.chats.similarBotsById) {
     cached.chats.similarBotsById = initialState.chats.similarBotsById;
   }
+
+  if (!cached.managedBotMenuButtonsById) {
+    cached.managedBotMenuButtonsById = initialState.managedBotMenuButtonsById;
+  }
+  cached.managedBotMenuButtonsById = {
+    ...cached.managedBotMenuButtonsById,
+    ...getAllStoredMenuButtons(),
+  };
 
   if (!cached.chats.lastMessageIds) {
     cached.chats.lastMessageIds = initialState.chats.lastMessageIds;
