@@ -2060,6 +2060,11 @@ export interface ActionPayloads {
     text?: string;
   } & WithTabId;
   disableBotFatherMenuButton: WithTabId | undefined;
+  cacheBotFatherMenuButton: {
+    isEnabled: boolean;
+    url?: string;
+    text?: string;
+  } & WithTabId;
   saveBotFatherMainApp: {
     url: string;
     launchMode?: 'compact' | 'fullsize' | 'fullscreen';

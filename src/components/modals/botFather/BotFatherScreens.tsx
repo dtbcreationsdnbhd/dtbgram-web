@@ -1344,7 +1344,11 @@ const BotFatherMiniAppsScreen = ({
   menuButtonIsEnabled,
 }: MiniAppsScreenProps) => {
   const {
-    setBotFatherModalView, showNotification, loadBotFatherDirectLinks, deleteBotFatherDirectLink,
+    setBotFatherModalView,
+    showNotification,
+    loadBotFatherDirectLinks,
+    deleteBotFatherDirectLink,
+    cacheBotFatherMenuButton,
   } = getActions();
 
   const lang = useLang();
@@ -1389,7 +1393,13 @@ const BotFatherMiniAppsScreen = ({
       if (isCancelled) return;
 
       if (menuButtonEnabledRef.current === undefined && menuButtonRes) {
-        setIsMenuButtonEnabled(Boolean(menuButtonRes.isEnabled && menuButtonRes.url));
+        const isEnabled = Boolean(menuButtonRes.isEnabled && menuButtonRes.url);
+        setIsMenuButtonEnabled(isEnabled);
+        cacheBotFatherMenuButton({
+          isEnabled,
+          url: isEnabled ? menuButtonRes.url : '',
+          text: isEnabled ? menuButtonRes.text : '',
+        });
       }
       if (accessSettingsRes) {
         setHasSameOriginRestriction(accessSettingsRes.isRestricted);
@@ -1408,7 +1418,7 @@ const BotFatherMiniAppsScreen = ({
     return () => {
       isCancelled = true;
     };
-  }, [bot, loadBotFatherDirectLinks]);
+  }, [bot, cacheBotFatherMenuButton, loadBotFatherDirectLinks]);
 
   const handleToggleSameOrigin = useLastCallback(async (isChecked: boolean) => {
     const previous = hasSameOriginRestriction;
@@ -1640,43 +1650,9 @@ const BotFatherMenuButtonScreen = ({
   const [title, setTitle] = useState(
     isMenuButtonDisabled ? '' : (menuButtonText || webAppMenuButton?.text || ''),
   );
-  const [hasCustomButton, setHasCustomButton] = useState(
-    isMenuButtonDisabled ? false : (menuButtonIsEnabled ?? Boolean(webAppMenuButton)),
-  );
-
-  useEffect(() => {
-    if (menuButtonIsEnabled === false) {
-      return undefined;
-    }
-
-    let isCancelled = false;
-
-    async function loadMenuButton() {
-      const res = await callApi('fetchBotMenuButton', { bot }).catch(() => undefined);
-      if (isCancelled) return;
-
-      if (res?.isEnabled && res.url) {
-        setUrl(res.url);
-        if (res.text) setTitle(res.text);
-        setHasCustomButton(true);
-        return;
-      }
-
-      if (menuButtonIsEnabled === true) {
-        return;
-      }
-
-      setUrl('');
-      setTitle('');
-      setHasCustomButton(false);
-    }
-
-    void loadMenuButton();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [bot, menuButtonIsEnabled]);
+  const hasCustomButton = isMenuButtonDisabled
+    ? false
+    : (menuButtonIsEnabled ?? Boolean(webAppMenuButton));
 
   const handleUrlChange = useLastCallback((e: ChangeEvent<HTMLInputElement>) => {
     setUrl(e.target.value);

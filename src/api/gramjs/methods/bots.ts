@@ -1045,6 +1045,28 @@ type BotApiMenuButtonResult = {
   isEnabled: boolean;
 };
 
+async function postBotApi(token: string, method: string, body: Record<string, unknown>) {
+  const jsonResponse = await fetch(`${BOT_API_BASE_URL}${token}/${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const jsonData = await jsonResponse.json() as { ok?: boolean };
+  if (jsonData.ok) return true as const;
+
+  const form = new URLSearchParams();
+  Object.entries(body).forEach(([key, value]) => {
+    form.set(key, typeof value === 'string' ? value : JSON.stringify(value));
+  });
+  const formResponse = await fetch(`${BOT_API_BASE_URL}${token}/${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form.toString(),
+  });
+  const formData = await formResponse.json() as { ok?: boolean };
+  return formData.ok ? true as const : undefined;
+}
+
 async function fetchChatMenuButtonViaApi(token: string): Promise<BotApiMenuButtonResult | undefined> {
   try {
     const response = await fetch(`${BOT_API_BASE_URL}${token}/getChatMenuButton`, {
@@ -1080,8 +1102,6 @@ async function fetchChatMenuButtonViaApi(token: string): Promise<BotApiMenuButto
   }
 }
 
-// MTProto `bots.SetBotMenuButton` requires bot-auth. For owned bots we use
-// the Bot HTTP API (`/setChatMenuButton`) from the owner's user session via the exported token.
 export async function setBotMenuButtonViaApi({
   token,
   url,
@@ -1095,13 +1115,9 @@ export async function setBotMenuButtonViaApi({
     ? { type: 'web_app', text: text || 'Open', web_app: { url } }
     : { type: 'commands' };
   try {
-    const response = await fetch(`${BOT_API_BASE_URL}${token}/setChatMenuButton`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ menu_button: menuButton }),
-    });
-    const data = await response.json() as { ok?: boolean };
-    return data.ok ? true as const : undefined;
+    const ok = await postBotApi(token, 'setChatMenuButton', { menu_button: menuButton });
+    if (ok || url) return ok;
+    return postBotApi(token, 'setChatMenuButton', { menu_button: { type: 'default' } });
   } catch {
     return undefined;
   }
@@ -1365,14 +1381,16 @@ async function invokeUrlAuthRequest(
 
 export async function fetchBotMenuButton({
   bot,
+  token,
 }: {
   bot: ApiUser;
+  token?: string;
 }) {
   const botUsername = bot.usernames?.find((u) => u.isActive)?.username
     || bot.usernames?.[0]?.username;
-  const token = await exportBotToken({ bot, revoke: false, botUsername });
-  if (token) {
-    return fetchChatMenuButtonViaApi(token);
+  const resolvedToken = token || await exportBotToken({ bot, revoke: false, botUsername });
+  if (resolvedToken) {
+    return fetchChatMenuButtonViaApi(resolvedToken);
   }
 
   return undefined;
@@ -1392,10 +1410,10 @@ export async function saveBotMenuButton({
       text: text || 'Open',
       url,
     })
-    : new GramJs.BotMenuButtonDefault();
+    : new GramJs.BotMenuButtonCommands();
 
   return invokeRequest(new GramJs.bots.SetBotMenuButton({
-    userId: buildInputUser(bot.id, bot.accessHash),
+    userId: new GramJs.InputUserEmpty(),
     button,
   }), {
     shouldReturnTrue: true,
