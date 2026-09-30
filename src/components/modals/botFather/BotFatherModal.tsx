@@ -218,6 +218,7 @@ const BotFatherModal = ({
           <MiniAppsScreen
             bot={selectedBot}
             fullInfo={selectedBotFullInfo}
+            managerBot={managerBot}
             directLinks={state.directLinks}
             isSavingMiniApp={state.isSavingMiniApp}
             menuButtonIsEnabled={isManagedMenuEnabled}

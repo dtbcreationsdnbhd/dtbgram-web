@@ -112,6 +112,7 @@ type LaunchMode = 'compact' | 'fullsize' | 'fullscreen';
 type MiniAppsScreenProps = {
   bot: ApiUser;
   fullInfo?: ApiUserFullInfo;
+  managerBot?: ApiUser;
   directLinks?: BotFatherDirectLinkItem[];
   isSavingMiniApp?: boolean;
   editingShortName?: string;
@@ -1338,6 +1339,7 @@ const BotFatherEditCommandScreen = ({
 const BotFatherMiniAppsScreen = ({
   bot,
   fullInfo,
+  managerBot,
   directLinks: modalDirectLinks,
   isSavingMiniApp,
   menuButtonIsEnabled,
@@ -1352,6 +1354,8 @@ const BotFatherMiniAppsScreen = ({
 
   const lang = useLang();
   const botUsername = getMainUsername(bot) || 'bot';
+  const managerUsername = managerBot ? getMainUsername(managerBot) : undefined;
+  const managerHandle = managerUsername ? `@${managerUsername}` : lang('BotFatherOfficialHandle');
 
   const initialMainAppEnabled = Boolean(bot.hasMainMiniApp || fullInfo?.botInfo?.appSettings);
 
@@ -1475,7 +1479,8 @@ const BotFatherMiniAppsScreen = ({
   });
 
   return (
-    <div className={buildClassName(styles.scrollBody, 'custom-scroll')}>
+    <div className={styles.miniAppsLayout}>
+      <div className={buildClassName(styles.scrollBody, 'custom-scroll')}>
       <div className={styles.miniAppsHero}>
         <div className={styles.miniAppsHeroIcon}>
           <div className={styles.miniAppsHeroIconGrid} aria-hidden="true">
@@ -1622,8 +1627,8 @@ const BotFatherMiniAppsScreen = ({
           shouldSkipModal
         />
       </p>
-
-      <p className={styles.footerNote}>{lang('BotFatherOfficialHandle')}</p>
+      </div>
+      <p className={styles.webAppHandle}>{managerHandle}</p>
     </div>
   );
 };

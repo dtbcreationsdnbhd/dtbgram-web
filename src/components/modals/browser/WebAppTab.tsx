@@ -29,7 +29,6 @@ import { shouldOpenWebAppInBrowser, stripTelegramWebAppParams } from '../../../u
 import { getGeolocationStatus, IS_GEOLOCATION_SUPPORTED } from '../../../util/browser/windowEnvironment';
 import buildClassName from '../../../util/buildClassName';
 import buildStyle from '../../../util/buildStyle.ts';
-import { copyTextToClipboard } from '../../../util/clipboard';
 import download from '../../../util/download';
 import { extractCurrentThemeParams, FALLBACK_THEME_PARAMS, validateHexColor } from '../../../util/themeStyle';
 import { callApi } from '../../../api/gramjs';
@@ -155,7 +154,6 @@ const WebAppTab = ({
 
   const [isLoaded, markLoaded, markUnloaded] = useFlag(false);
   const [hasHandshake, markHandshake, markNoHandshake] = useFlag(false);
-  const [isEmbedFallbackVisible, showEmbedFallback, hideEmbedFallback] = useFlag(false);
   const [isFrameRevealed, revealFrame, concealFrame] = useFlag(false);
   const embedHandshakeTimeoutRef = useRef<number>();
   const hasHandshakeRef = useRef(false);
@@ -280,33 +278,37 @@ const WebAppTab = ({
       hasHandshakeRef.current = true;
       markHandshake();
       revealFrame();
-      hideEmbedFallback();
     },
   );
 
+  const revealEmbedWithoutHandshake = useLastCallback(() => {
+    hasHandshakeRef.current = true;
+    markHandshake();
+    revealFrame();
+    markLoaded();
+  });
+
   useEffect(() => {
-    if (!isOpen || !url || hasHandshake || isEmbedFallbackVisible) {
+    if (!isOpen || !url || hasHandshake) {
       window.clearTimeout(embedHandshakeTimeoutRef.current);
       return undefined;
     }
 
     embedHandshakeTimeoutRef.current = window.setTimeout(() => {
       if (hasHandshakeRef.current) return;
-      showEmbedFallback();
-      markLoaded();
+      revealEmbedWithoutHandshake();
     }, EMBED_HANDSHAKE_TIMEOUT_MS);
 
     return () => {
       window.clearTimeout(embedHandshakeTimeoutRef.current);
     };
-  }, [hasHandshake, isEmbedFallbackVisible, isOpen, markLoaded, showEmbedFallback, url]);
+  }, [hasHandshake, isOpen, revealEmbedWithoutHandshake, url]);
 
   useEffect(() => {
     if (hasHandshake) {
       window.clearTimeout(embedHandshakeTimeoutRef.current);
-      hideEmbedFallback();
     }
-  }, [hasHandshake, hideEmbedFallback]);
+  }, [hasHandshake]);
 
   useEffect(() => {
     if (isActive) registerSendEventCallback(sendEvent);
@@ -683,7 +685,6 @@ const WebAppTab = ({
       window.clearTimeout(embedHandshakeTimeoutRef.current);
       hasHandshakeRef.current = false;
       markNoHandshake();
-      hideEmbedFallback();
       concealFrame();
       updateCurrentWebApp({
         isSettingsButtonVisible: false,
@@ -699,7 +700,6 @@ const WebAppTab = ({
   useEffect(() => {
     hasHandshakeRef.current = false;
     markNoHandshake();
-    hideEmbedFallback();
     concealFrame();
     markUnloaded();
   }, [url]);
@@ -724,22 +724,6 @@ const WebAppTab = ({
     if (!isActive || !url || !shouldOpenWebAppInBrowser(url)) return;
     handleOpenExternally();
   }, [handleOpenExternally, isActive, url]);
-
-  const handleCopyWebAppLink = useLastCallback(() => {
-    if (!url) return;
-    copyTextToClipboard(url);
-    showNotification({
-      message: { key: 'LinkCopied' },
-    });
-  });
-
-  const handleContinueEmbedAnyway = useLastCallback(() => {
-    hasHandshakeRef.current = true;
-    markHandshake();
-    hideEmbedFallback();
-    revealFrame();
-    markLoaded();
-  });
 
   const handleOpenChat = useLastCallback(() => {
     openChatWithInfo({ id: bot!.id });
@@ -1288,30 +1272,6 @@ const WebAppTab = ({
     );
   }
 
-  function renderEmbedFallback() {
-    if (!isEmbedFallbackVisible || isMinimizedState) return undefined;
-
-    return (
-      <div className={styles.embedFallback}>
-        <Icon name="link-broken" className={styles.embedFallbackIcon} />
-        <p className={styles.embedFallbackText}>
-          {lang('WebAppEmbedBlockedText')}
-        </p>
-        <div className={styles.embedFallbackActions}>
-          <Button color="primary" size="smaller" onClick={handleOpenExternally}>
-            {lang('WebAppOpenInBrowser')}
-          </Button>
-          <Button color="primary" isText size="smaller" onClick={handleCopyWebAppLink}>
-            {lang('CopyLink')}
-          </Button>
-          <Button color="primary" isText size="smaller" onClick={handleContinueEmbedAnyway}>
-            {lang('WebAppEmbedContinueAnyway')}
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   function renderBottomButtonContent(text: string | undefined, iconCustomEmojiId?: string) {
     const hasText = Boolean(text?.trim().length);
     if (!hasText && !iconCustomEmojiId) return undefined;
@@ -1348,13 +1308,12 @@ const WebAppTab = ({
       )}
     >
       {isFullscreen && getIsWebAppsFullscreenSupported() && renderFullscreenHeaderPanel()}
-      {!isMinimizedState && !isEmbedFallbackVisible && !isFrameRevealed && renderPlaceholder()}
-      {renderEmbedFallback()}
+      {!isMinimizedState && !isFrameRevealed && renderPlaceholder()}
       <iframe
         className={buildClassName(
           styles.frame,
           shouldDecreaseWebFrameSize && styles.withButton,
-          (!isFrameRevealed || isEmbedFallbackVisible) && styles.hide,
+          !isFrameRevealed && styles.hide,
         )}
         style={frameStyle}
         src={url}

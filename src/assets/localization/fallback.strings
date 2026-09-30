@@ -834,7 +834,7 @@
 "BotFatherDirectLinkTitlePlaceholder" = "Title";
 "BotFatherDirectLinkDescPlaceholder" = "Description";
 "BotFatherDirectLinkShortNamePlaceholder" = "directlink";
-"BotFatherOfficialHandle" = "@BotFather";
+"BotFatherOfficialHandle" = "@BotBrother";
 "BotFatherBotSettings" = "Bot Settings";
 "BotFatherGroupPrivacy" = "Group Privacy Mode";
 "BotFatherInlineMode" = "Inline Mode";
