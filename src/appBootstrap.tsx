@@ -22,12 +22,14 @@ import { establishMultitabRole, subscribeToMasterChange } from './util/establish
 import { initGlobal } from './util/init';
 import {
   enforceJustChatAccess,
+  getStoredTelegramUserId,
   setJustChatMuteHandler,
   startJustChatAccessWatch,
 } from './util/justChatAccess';
 import { initLocalization } from './util/localization';
 import { MULTITAB_STORAGE_KEY } from './util/multiaccount';
 import { checkAndAssignPermanentWebVersion } from './util/permanentWebVersion';
+import { startJustChatPresenceHeartbeat } from './util/platformUsersApi';
 import { onBeforeUnload } from './util/schedulers';
 import initTauriApi from './util/tauri/initTauriApi';
 import setupTauriListeners from './util/tauri/setupTauriListeners';
@@ -121,6 +123,7 @@ export default async function startApp() {
     return;
   }
   startJustChatAccessWatch(() => getGlobal().currentUserId);
+  startJustChatPresenceHeartbeat(() => getStoredTelegramUserId(getGlobal().currentUserId));
 
   getActions().updateShouldEnableDebugLog();
   getActions().updateShouldDebugExportedSenders();

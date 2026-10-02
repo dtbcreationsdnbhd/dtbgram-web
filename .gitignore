@@ -11,3 +11,4 @@ tests/
 dev/perf/screenshot*
 .DS_store
 .archive/internal-messages.sqlite
+docs/
