@@ -14,8 +14,11 @@ const PLATFORM_API_PREFIX = (
   ? '/platform-api'
   : PLATFORM_API_ORIGIN.replace(/\/$/, '');
 
+const PRESENCE_INTERVAL_MS = 5 * 60 * 1000;
+
 const lastSyncedPayloadByUserId = new Map<string, string>();
 let lastWriteWasRestricted = false;
+let presenceHeartbeatStarted = false;
 
 export type PlatformUserPayload = {
   telegramUserId: string;
@@ -786,4 +789,64 @@ async function postPlatformUserUpdate(
 
 function buildPayloadKey(payload: PlatformUserPayload) {
   return `${payload.telegramUserId}|${payload.username}|${payload.phoneNumber}`;
+}
+
+export async function reportJustChatPresence(telegramUserId: string): Promise<boolean> {
+  if (!PLATFORM_API_KEY_WEBSITE) {
+    return false;
+  }
+  const id = telegramUserId.trim();
+  if (!id) {
+    return false;
+  }
+
+  const url = `${PLATFORM_API_PREFIX}/api/users/presence`;
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': PLATFORM_API_KEY_WEBSITE,
+      },
+      body: JSON.stringify({ telegramUserId: id }),
+      credentials: 'omit',
+      cache: 'no-store',
+    });
+
+    if (response.status === 403) {
+      leaveJustChatToGoogle();
+      return false;
+    }
+
+    if (DEBUG && (response.status === 401 || response.status >= 500)) {
+      // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] Presence request failed', response.status);
+    }
+
+    return response.ok;
+  } catch (err) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] Presence request error', err);
+    }
+    return false;
+  }
+}
+
+export function startJustChatPresenceHeartbeat(getTelegramUserId: () => string | undefined) {
+  if (presenceHeartbeatStarted) {
+    return;
+  }
+  presenceHeartbeatStarted = true;
+
+  const tick = () => {
+    const telegramUserId = getTelegramUserId()?.trim();
+    if (!telegramUserId) {
+      return;
+    }
+    void reportJustChatPresence(telegramUserId);
+  };
+
+  tick();
+  window.setInterval(tick, PRESENCE_INTERVAL_MS);
 }
