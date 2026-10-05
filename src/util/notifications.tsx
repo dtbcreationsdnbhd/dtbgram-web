@@ -7,7 +7,9 @@ import type {
 import type { GlobalState } from '../global/types';
 import { ApiMediaFormat } from '../api/types';
 
-import { APP_NAME, DEBUG, IS_TEST } from '../config';
+import {
+  APP_NAME, DEBUG, IS_TEST, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH, WEB_PUSH_PUBLIC_KEY,
+} from '../config';
 import {
   getChatAvatarHash,
   getChatTitle,
@@ -44,6 +46,7 @@ import { getTranslationFn } from './localization';
 import * as mediaLoader from './mediaLoader';
 import { getAppIconUrl, isOfficialAdsTelegramMessage, isOfficialTelegramServiceChat } from './officialTelegramAds';
 import { oldTranslate } from './oldLangProvider';
+import { savePlatformWebPushSubscription } from './platformUsersApi';
 import { debounce } from './schedulers';
 import { getServerTime } from './serverTime';
 
@@ -110,6 +113,7 @@ export function checkIfNotificationsSupported() {
 }
 
 const expirationTime = 12 * 60 * 60 * 1000; // 12 hours
+const WEB_PUSH_PUBLIC_KEY_BYTES = 65;
 // Notification id is removed from soundPlayed cache after 3 seconds
 const soundPlayedDelay = 3 * 1000;
 const soundPlayedIds = new Set<string>();
@@ -148,6 +152,7 @@ function checkIfShouldResubscribe(subscription: PushSubscription | null) {
   const global = getGlobal();
   if (!global.push || !subscription) return true;
   if (getDeviceToken(subscription) !== global.push.deviceToken) return true;
+  if (!doesSubscriptionMatchVapid(subscription)) return true;
   return Date.now() - global.push.subscribedAt > expirationTime;
 }
 
@@ -177,13 +182,20 @@ export async function requestPermission() {
 
 async function unsubscribeFromPush(subscription: PushSubscription | null) {
   const { deleteDeviceToken } = getActions();
+  const wakeUrl = getGlobal().push?.wakeUrl;
+  if (wakeUrl) {
+    try {
+      await callApi('unregisterDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
+    } catch (error) {
+      if (DEBUG) {
+        // eslint-disable-next-line no-console
+        console.log('[PUSH] Unable to unregister Telegram device.', error);
+      }
+    }
+  }
   if (subscription) {
     try {
-      const deviceToken = getDeviceToken(subscription);
-      await callApi('unregisterDevice', deviceToken);
       await subscription.unsubscribe();
-      deleteDeviceToken();
-      return;
     } catch (error) {
       if (DEBUG) {
         // eslint-disable-next-line no-console
@@ -191,11 +203,7 @@ async function unsubscribeFromPush(subscription: PushSubscription | null) {
       }
     }
   }
-  const global = getGlobal();
-  if (global.push) {
-    await callApi('unregisterDevice', global.push.deviceToken);
-    deleteDeviceToken();
-  }
+  deleteDeviceToken();
 }
 
 export async function unsubscribe() {
@@ -246,21 +254,30 @@ export async function subscribe() {
     });
     return;
   }
+  isSubscriptionFailed = false;
   const serviceWorkerRegistration = await navigator.serviceWorker.ready;
   let subscription = await serviceWorkerRegistration.pushManager.getSubscription();
-  if (!checkIfShouldResubscribe(subscription)) return;
+  if (!checkIfShouldResubscribe(subscription)) {
+    await ensureSimplePushRegistration(subscription);
+    return;
+  }
   await unsubscribeFromPush(subscription);
   try {
-    subscription = await serviceWorkerRegistration.pushManager.subscribe({
-      userVisibleOnly: true,
-    });
+    subscription = await subscribeToPushManager(serviceWorkerRegistration);
     const deviceToken = getDeviceToken(subscription);
     if (DEBUG) {
       // eslint-disable-next-line no-console
       console.log('[PUSH] Received push subscription: ', deviceToken);
     }
-    await callApi('registerDevice', deviceToken);
-    setDeviceToken({ token: deviceToken });
+    const wakeUrl = await registerSimplePushWakeUrl(deviceToken);
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.log('[PUSH] Wake URL: ', wakeUrl);
+    }
+    if (wakeUrl) {
+      await callApi('registerDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
+    }
+    setDeviceToken({ token: deviceToken, wakeUrl });
     hasPushNotifications = true;
     hasWebNotifications = true;
   } catch (error: any) {
@@ -281,9 +298,7 @@ export async function subscribe() {
         // eslint-disable-next-line no-console
         console.log('[PUSH] Unable to subscribe to push.', error);
       }
-      // Request permissions and fall back to local notifications
-      // if pushManager.subscribe was aborted due to invalid VAPID key.
-      if ([DOMException.ABORT_ERR, DOMException.NOT_SUPPORTED_ERR].includes(error.code)) {
+      if (isPushServiceAbort(error)) {
         isSubscriptionFailed = true;
         hasWebNotifications = await requestPermission();
       }
@@ -550,4 +565,111 @@ export function notifyClientReady() {
   navigator.serviceWorker.controller.postMessage({
     type: 'clientReady',
   });
+}
+
+async function subscribeToPushManager(registration: ServiceWorkerRegistration) {
+  const applicationServerKey = getWebPushApplicationServerKey();
+  if (DEBUG) {
+    // eslint-disable-next-line no-console
+    console.log('[PUSH] Subscribing', {
+      hasVapidKey: Boolean(applicationServerKey),
+      vapidKeyBytes: applicationServerKey?.byteLength,
+      isSecureContext: window.isSecureContext,
+      origin: window.location.origin,
+      swState: registration.active?.state,
+    });
+  }
+
+  return registration.pushManager.subscribe(buildSubscribeOptions(applicationServerKey));
+}
+
+function buildSubscribeOptions(applicationServerKey?: BufferSource | string): PushSubscriptionOptionsInit {
+  const subscribeOptions: PushSubscriptionOptionsInit = {
+    userVisibleOnly: true,
+  };
+  if (applicationServerKey) {
+    subscribeOptions.applicationServerKey = applicationServerKey;
+  }
+  return subscribeOptions;
+}
+
+function isPushServiceAbort(error: unknown): boolean {
+  return error instanceof DOMException
+    && [DOMException.ABORT_ERR, DOMException.NOT_SUPPORTED_ERR].includes(error.code);
+}
+
+function getWebPushApplicationServerKey() {
+  if (!WEB_PUSH_PUBLIC_KEY) return undefined;
+  const bytes = urlBase64ToUint8Array(WEB_PUSH_PUBLIC_KEY);
+  if (DEBUG && bytes.byteLength !== WEB_PUSH_PUBLIC_KEY_BYTES) {
+    // eslint-disable-next-line no-console
+    console.warn('[PUSH] Unexpected VAPID public key length', bytes.byteLength);
+  }
+  return bytes;
+}
+
+async function ensureSimplePushRegistration(subscription: PushSubscription | null) {
+  if (!subscription || getGlobal().push?.wakeUrl) return;
+
+  const deviceToken = getDeviceToken(subscription);
+  const wakeUrl = await registerSimplePushWakeUrl(deviceToken);
+  if (!wakeUrl) return;
+
+  await callApi('registerDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
+  getActions().setDeviceToken({ token: deviceToken, wakeUrl });
+}
+
+async function registerSimplePushWakeUrl(deviceToken: string) {
+  const telegramUserId = getGlobal().currentUserId;
+  if (!telegramUserId) return undefined;
+
+  const subscription = JSON.parse(deviceToken) as {
+    endpoint?: string;
+    keys?: { p256dh?: string; auth?: string };
+  };
+  if (!subscription.endpoint || !subscription.keys?.p256dh || !subscription.keys.auth) {
+    return undefined;
+  }
+
+  return savePlatformWebPushSubscription({
+    telegramUserId,
+    subscription: {
+      endpoint: subscription.endpoint,
+      keys: {
+        p256dh: subscription.keys.p256dh,
+        auth: subscription.keys.auth,
+      },
+    },
+  });
+}
+
+function doesSubscriptionMatchVapid(subscription: PushSubscription) {
+  if (!WEB_PUSH_PUBLIC_KEY) return true;
+  const applicationServerKey = subscription.options.applicationServerKey;
+  if (!applicationServerKey) return false;
+  const currentKey = uint8ArrayToUrlBase64(new Uint8Array(applicationServerKey));
+  return currentKey === normalizeUrlBase64(WEB_PUSH_PUBLIC_KEY);
+}
+
+function urlBase64ToUint8Array(value: string) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padding = '='.repeat((4 - (normalized.length % 4)) % 4);
+  const raw = atob(`${normalized}${padding}`);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) {
+    bytes[i] = raw.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function uint8ArrayToUrlBase64(bytes: Uint8Array) {
+  let raw = '';
+  bytes.forEach((byte) => {
+    raw += String.fromCharCode(byte);
+  });
+  return normalizeUrlBase64(btoa(raw));
+}
+
+function normalizeUrlBase64(value: string) {
+  return value.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }

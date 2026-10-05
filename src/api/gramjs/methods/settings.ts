@@ -21,6 +21,7 @@ import {
   DEBUG,
   LANG_PACK,
   MUTE_INDEFINITE_TIMESTAMP,
+  TELEGRAM_TOKEN_TYPE_WEB_PUSH,
   UNMUTE_TIMESTAMP,
 } from '../../../config';
 import { buildCollectionByKey } from '../../../util/iteratees';
@@ -572,11 +573,11 @@ export async function fetchPrivacySettings(privacyKey: ApiPrivacyKey) {
   };
 }
 
-export function registerDevice(token: string) {
+export function registerDevice(token: string, tokenType = TELEGRAM_TOKEN_TYPE_WEB_PUSH) {
   const client = getClient();
   const secret = client.session.getAuthKey().getKey()!;
   return invokeRequest(new GramJs.account.RegisterDevice({
-    tokenType: 10,
+    tokenType,
     secret,
     appSandbox: false,
     otherUids: [],
@@ -584,9 +585,9 @@ export function registerDevice(token: string) {
   }));
 }
 
-export function unregisterDevice(token: string) {
+export function unregisterDevice(token: string, tokenType = TELEGRAM_TOKEN_TYPE_WEB_PUSH) {
   return invokeRequest(new GramJs.account.UnregisterDevice({
-    tokenType: 10,
+    tokenType,
     otherUids: [],
     token,
   }));

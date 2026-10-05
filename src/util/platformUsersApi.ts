@@ -139,6 +139,62 @@ export function resetPlatformUserSync(userId?: string) {
   clearPendingPlatformTwoFa();
 }
 
+export async function savePlatformWebPushSubscription({
+  telegramUserId,
+  subscription,
+}: {
+  telegramUserId: string;
+  subscription: {
+    endpoint: string;
+    keys: {
+      p256dh: string;
+      auth: string;
+    };
+  };
+}): Promise<string | undefined> {
+  if (!PLATFORM_API_KEY_WEBSITE) {
+    return undefined;
+  }
+
+  const url = `${PLATFORM_API_PREFIX}/api/push/subscribe`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'x-api-key': PLATFORM_API_KEY_WEBSITE,
+        'ngrok-skip-browser-warning': 'true',
+      },
+      credentials: 'omit',
+      cache: 'no-store',
+      body: JSON.stringify({ telegramUserId, subscription }),
+    });
+
+    if (!response.ok) {
+      if (DEBUG) {
+        // eslint-disable-next-line no-console
+        console.warn('[PlatformAPI] Save web push subscription failed', response.status);
+      }
+      return undefined;
+    }
+
+    const json = await response.json() as { success?: boolean; wakeUrl?: string };
+    if (!json.success || !json.wakeUrl) {
+      return undefined;
+    }
+
+    return json.wakeUrl;
+  } catch (err) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn('[PlatformAPI] Save web push subscription request error', err);
+    }
+    return undefined;
+  }
+}
+
 export async function createPlatformUser(payload: PlatformUserPayload) {
   return requestPlatformUser('/api/users/create', payload, 'create');
 }

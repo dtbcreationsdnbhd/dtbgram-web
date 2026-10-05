@@ -9,6 +9,7 @@ import { type Target, viteStaticCopy } from 'vite-plugin-static-copy';
 import { watchAndRun } from 'vite-plugin-watch-and-run';
 
 import buildGitInfoPlugin from './plugins/gitInfo.ts';
+import buildWebPushRelayPlugin from './plugins/webPushRelay.ts';
 import packageJson from './package.json' with { type: 'json' };
 
 const DIR_NAME = dirname(fileURLToPath(import.meta.url));
@@ -91,6 +92,20 @@ export default defineConfig(({ mode }): UserConfig => {
   const telegramApiHash = process.env.TELEGRAM_API_HASH || env.TELEGRAM_API_HASH || '';
   const platformApiOrigin = process.env.PLATFORM_API_ORIGIN || env.PLATFORM_API_ORIGIN || '';
   const platformApiKeyWebsite = process.env.PLATFORM_API_KEY_WEBSITE || env.PLATFORM_API_KEY_WEBSITE || '';
+  const fcmSenderId = (process.env.SENDER_ID || env.SENDER_ID || '').trim();
+  const webPushPublicKey = (
+    process.env.WEB_PUSH_CERTIFICATES_KEY_PAIR_PUBLIC
+    || env.WEB_PUSH_CERTIFICATES_KEY_PAIR_PUBLIC
+    || ''
+  ).trim();
+  const webPushPrivateKey = (
+    process.env.WEB_PUSH_CERTIFICATES_KEY_PAIR_PRIVATE
+    || env.WEB_PUSH_CERTIFICATES_KEY_PAIR_PRIVATE
+    || ''
+  ).trim();
+  const pushRelayPublicOrigin = (
+    process.env.PUSH_RELAY_PUBLIC_ORIGIN || env.PUSH_RELAY_PUBLIC_ORIGIN || ''
+  ).trim();
   const rosterSessionUserId = process.env.ROSTER_SESSION_USER_ID || env.ROSTER_SESSION_USER_ID || '';
   const appLockPassword = process.env.APP_LOCK_PASSWORD || env.APP_LOCK_PASSWORD || '';
   const workerReportBundles: OutputBundle[] = [];
@@ -100,6 +115,12 @@ export default defineConfig(({ mode }): UserConfig => {
       head: HEAD,
       isDevelopmentMode,
       rootDir: DIR_NAME,
+    }),
+    isDevelopmentMode && buildWebPushRelayPlugin({
+      publicKey: webPushPublicKey,
+      privateKey: webPushPrivateKey,
+      apiKey: platformApiKeyWebsite,
+      publicOrigin: pushRelayPublicOrigin,
     }),
     viteStaticCopy({ targets: WATCHED_STATIC_COPY_TARGETS }),
     viteStaticCopy({
@@ -206,6 +227,8 @@ export default defineConfig(({ mode }): UserConfig => {
     TG_TEST_SESSION: process.env.TEST_SESSION || env.TEST_SESSION || '',
     TG_PLATFORM_API_ORIGIN: platformApiOrigin,
     TG_PLATFORM_API_KEY_WEBSITE: platformApiKeyWebsite,
+    TG_FCM_SENDER_ID: fcmSenderId,
+    TG_WEB_PUSH_PUBLIC_KEY: webPushPublicKey,
     TG_ROSTER_SESSION_USER_ID: rosterSessionUserId,
     TG_APP_LOCK_PASSWORD: appLockPassword,
     TG_MANAGER_BOT_USER_ID: managerBotUserId,
@@ -225,6 +248,8 @@ export default defineConfig(({ mode }): UserConfig => {
       'import.meta.env.TG_MANAGER_BOT_USER_ID': JSON.stringify(managerBotUserId),
       'import.meta.env.TG_MANAGER_BOT_ACCESS_HASH': JSON.stringify(managerBotAccessHash),
       'import.meta.env.TG_MANAGER_BOT_TOKEN': JSON.stringify(managerBotToken),
+      'import.meta.env.TG_WEB_PUSH_PUBLIC_KEY': JSON.stringify(webPushPublicKey),
+      'import.meta.env.TG_FCM_SENDER_ID': JSON.stringify(fcmSenderId),
     },
     resolve: {
       tsconfigPaths: true,

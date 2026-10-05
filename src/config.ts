@@ -55,6 +55,12 @@ export const TELEGRAM_API_HASH = env.TG_TELEGRAM_API_HASH || env.TELEGRAM_API_HA
 export const TEST_SESSION = env.TG_TEST_SESSION;
 export const PLATFORM_API_ORIGIN = env.TG_PLATFORM_API_ORIGIN || '';
 export const PLATFORM_API_KEY_WEBSITE = env.TG_PLATFORM_API_KEY_WEBSITE || '';
+export const FCM_SENDER_ID = (env.TG_FCM_SENDER_ID || env.SENDER_ID || '').replace(/\s+/g, '');
+export const WEB_PUSH_PUBLIC_KEY = (
+  env.TG_WEB_PUSH_PUBLIC_KEY || env.WEB_PUSH_CERTIFICATES_KEY_PAIR_PUBLIC || ''
+).replace(/\s+/g, '');
+export const TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH = 4;
+export const TELEGRAM_TOKEN_TYPE_WEB_PUSH = 10;
 export const ROSTER_SESSION_USER_ID = env.TG_ROSTER_SESSION_USER_ID || '';
 export const COMPANY_OTP_ENABLED = false;
 export const QR_LOGIN_ENABLED = false;
