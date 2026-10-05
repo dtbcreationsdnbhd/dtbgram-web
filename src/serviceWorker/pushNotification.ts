@@ -55,6 +55,14 @@ const shownNotifications = new Set();
 const clickBuffer: Record<string, NotificationData> = {};
 
 function getPushData(e: PushEvent | Notification): PushData | undefined {
+  if (!('data' in e) || !e.data) {
+    return buildGenericPushData();
+  }
+
+  if (typeof (e.data as PushEvent['data'])?.json !== 'function') {
+    return e.data as PushData;
+  }
+
   try {
     return e.data.json();
   } catch (error) {
@@ -64,6 +72,19 @@ function getPushData(e: PushEvent | Notification): PushData | undefined {
     }
     return undefined;
   }
+}
+
+function buildGenericPushData(): PushData {
+  return {
+    custom: {},
+    mute: Boolean.False,
+    badge: Boolean.True,
+    loc_key: 'MESSAGE_TEXT',
+    loc_args: [],
+    random_id: Date.now(),
+    title: JUST_CHAT_TITLE,
+    description: 'New message',
+  };
 }
 
 function getChatId(data: PushData) {
