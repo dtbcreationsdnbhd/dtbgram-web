@@ -49,6 +49,7 @@ import { oldTranslate } from './oldLangProvider';
 import { savePlatformWebPushSubscription } from './platformUsersApi';
 import { debounce } from './schedulers';
 import { getServerTime } from './serverTime';
+import trimText from './trimText';
 
 import MessageSummary from '../components/common/MessageSummary';
 
@@ -522,7 +523,9 @@ export async function notifyAboutMessage({
 const PAGE_NOTIFICATION_TAG = 'justchat';
 const MAX_PAGE_INBOX_CHATS = 8;
 const MAX_PAGE_LINES_PER_CHAT = 5;
+const MAX_ROW_LENGTH = 60;
 const SECONDS_TO_MS = 1000;
+const ROW_WHITESPACE_RE = /\s+/g;
 
 type PageInboxEntry = {
   chatId: string;
@@ -531,6 +534,10 @@ type PageInboxEntry = {
   messageId: number;
   icon?: string;
   sentAt?: number;
+};
+
+type PageNotificationOptions = NotificationOptions & {
+  timestamp?: number;
 };
 
 const pageInboxByChatId = new Map<string, PageInboxEntry>();
@@ -545,6 +552,11 @@ function latestSentAt(current?: number, next?: number) {
 function clampNotificationTimestamp(sentAt?: number) {
   if (!sentAt) return undefined;
   return Math.min(sentAt, Date.now());
+}
+
+function formatRow(text?: string) {
+  const flattened = (text || '').replace(ROW_WHITESPACE_RE, ' ').trim();
+  return trimText(flattened, MAX_ROW_LENGTH) || '';
 }
 
 function showGroupedPageNotification({
@@ -588,13 +600,13 @@ function showGroupedPageNotification({
   const onlyEntry = entries.length === 1 ? entries[0] : undefined;
   const notificationTitle = onlyEntry ? onlyEntry.title : APP_NAME;
   const notificationBody = onlyEntry
-    ? onlyEntry.bodies.join('\n')
-    : entries.map((entry) => `${entry.title}: ${entry.bodies[entry.bodies.length - 1]}`).join('\n');
+    ? onlyEntry.bodies.map((line) => formatRow(line)).join('\n')
+    : entries.map((entry) => formatRow(`${entry.title}: ${entry.bodies[entry.bodies.length - 1]}`)).join('\n');
   const notificationSentAt = clampNotificationTimestamp(entries.reduce<number | undefined>(
     (latest, entry) => latestSentAt(latest, entry.sentAt),
     undefined,
   ));
-  const options: NotificationOptions = {
+  const options: PageNotificationOptions = {
     body: notificationBody,
     icon: onlyEntry?.icon || icon,
     badge: onlyEntry?.icon || icon,
@@ -619,11 +631,10 @@ function showGroupedPageNotification({
   try {
     notification = new Notification(notificationTitle, options);
   } catch (err) {
-    notification = new Notification(notificationTitle, {
-      ...options,
-      timestamp: undefined,
-      renotify: undefined,
-    });
+    const fallbackOptions: NotificationOptions = { ...options };
+    Reflect.deleteProperty(fallbackOptions, 'timestamp');
+    Reflect.deleteProperty(fallbackOptions, 'renotify');
+    notification = new Notification(notificationTitle, fallbackOptions);
   }
   activePageNotification = notification;
   notification.onclick = () => {
@@ -713,7 +724,7 @@ function buildSubscribeOptions(applicationServerKey?: BufferSource | string): Pu
 
 function isPushServiceAbort(error: unknown): boolean {
   return error instanceof DOMException
-    && [DOMException.ABORT_ERR, DOMException.NOT_SUPPORTED_ERR].includes(error.code);
+    && (error.code === DOMException.ABORT_ERR || error.code === DOMException.NOT_SUPPORTED_ERR);
 }
 
 function getWebPushApplicationServerKey() {

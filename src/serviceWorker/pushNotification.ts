@@ -2,6 +2,7 @@ import { APP_NAME, DEBUG, DEBUG_MORE } from '../config';
 import { isChatHidden } from '../util/hiddenChats';
 import { isInternalChat } from '../util/internalChats';
 import { includesAdsTelegramOrg, isOfficialTelegramServiceChat, JUST_CHAT_TITLE } from '../util/officialTelegramAds';
+import trimText from '../util/trimText';
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -55,8 +56,10 @@ type CloseNotificationData = {
 const APP_NOTIFICATION_TAG = 'justchat';
 const MAX_INBOX_CHATS = 8;
 const MAX_LINES_PER_CHAT = 5;
+const MAX_ROW_LENGTH = 60;
 const SECONDS_TO_MS = 1000;
 const UNIX_MS_THRESHOLD = 1e12;
+const ROW_WHITESPACE_RE = /\s+/g;
 
 type InboxEntry = {
   chatId?: string;
@@ -70,9 +73,14 @@ type InboxEntry = {
   sentAt?: number;
 };
 
+type AppNotificationOptions = NotificationOptions & {
+  timestamp?: number;
+};
+
 const inboxByChatKey = new Map<string, InboxEntry>();
 const shownNotifications = new Set();
 const clickBuffer: Record<string, NotificationData> = {};
+let restorePromise: Promise<void> | undefined;
 
 function getPushData(e: PushEvent | Notification): PushData | undefined {
   if (!('data' in e) || !e.data) {
@@ -182,6 +190,39 @@ function getInboxKey(chatId?: string) {
   return chatId || '0';
 }
 
+function formatRow(text?: string) {
+  const flattened = (text || '').replace(ROW_WHITESPACE_RE, ' ').trim();
+  return trimText(flattened, MAX_ROW_LENGTH) || '';
+}
+
+function isInboxEntry(value: unknown): value is InboxEntry {
+  if (!value || typeof value !== 'object') return false;
+  const entry = value as InboxEntry;
+  return typeof entry.title === 'string'
+    && Array.isArray(entry.bodies)
+    && entry.bodies.every((body) => typeof body === 'string');
+}
+
+function restoreInbox() {
+  if (inboxByChatKey.size) return Promise.resolve();
+  if (restorePromise) return restorePromise;
+
+  restorePromise = (async () => {
+    const notifications = await self.registration.getNotifications({ tag: APP_NOTIFICATION_TAG });
+    const stored = notifications[0]?.data?.entries;
+    if (!Array.isArray(stored)) return;
+
+    stored.forEach((entry) => {
+      if (!isInboxEntry(entry)) return;
+      inboxByChatKey.set(getInboxKey(entry.chatId), entry);
+    });
+  })().finally(() => {
+    restorePromise = undefined;
+  });
+
+  return restorePromise;
+}
+
 function rememberInboxEntry(notification: NotificationData) {
   const key = getInboxKey(notification.chatId);
   const previous = inboxByChatKey.get(key);
@@ -216,17 +257,17 @@ function buildGroupedNotification(shouldAlert: boolean) {
   const entries = Array.from(inboxByChatKey.values()).reverse();
   const onlyEntry = entries.length === 1 ? entries[0] : undefined;
   const title = onlyEntry ? onlyEntry.title : APP_NAME;
-  // One row per sender, newest chat first
+  // One short row per sender, newest chat first. The saved entries keep the full text.
   const body = onlyEntry
-    ? onlyEntry.bodies.join('\n')
-    : entries.map((entry) => `${entry.title}: ${entry.bodies[entry.bodies.length - 1]}`).join('\n');
+    ? onlyEntry.bodies.map((line) => formatRow(line)).join('\n')
+    : entries.map((entry) => formatRow(`${entry.title}: ${entry.bodies[entry.bodies.length - 1]}`)).join('\n');
   const messageCount = entries.reduce((sum, entry) => sum + entry.bodies.length, 0);
   const sentAt = clampNotificationTimestamp(entries.reduce<number | undefined>(
     (latest, entry) => latestSentAt(latest, entry.sentAt),
     undefined,
   ));
 
-  const options: NotificationOptions = {
+  const options: AppNotificationOptions = {
     body,
     data: {
       chatId: onlyEntry?.chatId,
@@ -234,6 +275,7 @@ function buildGroupedNotification(shouldAlert: boolean) {
       reaction: onlyEntry?.reaction,
       count: messageCount,
       shouldReplaceHistory: onlyEntry?.shouldReplaceHistory,
+      entries: Array.from(inboxByChatKey.values()),
     },
     icon: onlyEntry?.icon || 'icon-192x192.png',
     badge: 'icon-192x192.png',
@@ -271,15 +313,15 @@ async function publishInbox(shouldAlert: boolean) {
     await self.registration.showNotification(title, options);
   } catch (err) {
     // A rejected timestamp or `renotify` must not swallow the alert
-    await self.registration.showNotification(title, {
-      ...options,
-      timestamp: undefined,
-      renotify: undefined,
-    });
+    const fallbackOptions: NotificationOptions = { ...options };
+    Reflect.deleteProperty(fallbackOptions, 'timestamp');
+    Reflect.deleteProperty(fallbackOptions, 'renotify');
+    await self.registration.showNotification(title, fallbackOptions);
   }
 }
 
-function showNotification(notification: NotificationData) {
+async function showNotification(notification: NotificationData) {
+  await restoreInbox();
   if (!rememberInboxEntry(notification)) return undefined;
 
   const shouldAlert = !notification.reaction && !notification.isSilent;
@@ -300,6 +342,7 @@ async function closeNotifications({
   // Only an inbox read cursor dismisses the alert
   if (!lastReadInboxMessageId) return;
 
+  await restoreInbox();
   const key = getInboxKey(chatId);
   const entry = inboxByChatKey.get(key);
   if (!entry || (entry.messageId !== undefined && entry.messageId > lastReadInboxMessageId)) return;
@@ -341,11 +384,12 @@ export function handlePush(e: PushEvent) {
 }
 
 async function focusChatMessage(client: WindowClient, data: FocusMessageData) {
-  if (!data.chatId) return;
-  client.postMessage({
-    type: 'focusMessage',
-    payload: data,
-  });
+  if (data.chatId) {
+    client.postMessage({
+      type: 'focusMessage',
+      payload: data,
+    });
+  }
   if (!client.focused) {
     // Catch "focus not allowed" DOM Exceptions
     try {
