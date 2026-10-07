@@ -116,7 +116,9 @@ export default defineConfig(({ mode }): UserConfig => {
       isDevelopmentMode,
       rootDir: DIR_NAME,
     }),
-    isDevelopmentMode && buildWebPushRelayPlugin({
+    // A set PLATFORM_API_ORIGIN means this dev server should proxy subscribe and
+    // wake to that admin. The in-memory relay is only for dev with no admin.
+    isDevelopmentMode && !platformApiOrigin && buildWebPushRelayPlugin({
       publicKey: webPushPublicKey,
       privateKey: webPushPrivateKey,
       apiKey: platformApiKeyWebsite,
