@@ -11,6 +11,7 @@ enum Boolean {
 }
 
 type PushData = {
+  date?: number;
   custom: {
     msg_id?: string;
     silent?: string;
@@ -36,6 +37,7 @@ type NotificationData = {
   icon?: string;
   reaction?: string;
   shouldReplaceHistory?: boolean;
+  sentAt?: number;
 };
 
 type FocusMessageData = {
@@ -53,6 +55,8 @@ type CloseNotificationData = {
 const APP_NOTIFICATION_TAG = 'justchat';
 const MAX_INBOX_CHATS = 8;
 const MAX_LINES_PER_CHAT = 5;
+const SECONDS_TO_MS = 1000;
+const UNIX_MS_THRESHOLD = 1e12;
 
 type InboxEntry = {
   chatId?: string;
@@ -63,6 +67,7 @@ type InboxEntry = {
   reaction?: string;
   isSilent?: boolean;
   shouldReplaceHistory?: boolean;
+  sentAt?: number;
 };
 
 const inboxByChatKey = new Map<string, InboxEntry>();
@@ -120,6 +125,17 @@ function getMessageId(data: PushData) {
   return parseInt(data.custom.msg_id, 10);
 }
 
+function toNotificationTimestamp(date?: number) {
+  if (!date) return undefined;
+  return date < UNIX_MS_THRESHOLD ? date * SECONDS_TO_MS : date;
+}
+
+function earliestSentAt(current?: number, next?: number) {
+  if (current === undefined) return next;
+  if (next === undefined) return current;
+  return Math.min(current, next);
+}
+
 function getNotificationData(data: PushData): NotificationData {
   const chatId = getChatId(data);
   let title = (isOfficialTelegramServiceChat(chatId) ? JUST_CHAT_TITLE : data.title) || APP_NAME;
@@ -134,6 +150,7 @@ function getNotificationData(data: PushData): NotificationData {
     isSilent,
     title,
     icon: isOfficialTelegramServiceChat(chatId) ? 'icon-192x192.png' : undefined,
+    sentAt: toNotificationTimestamp(data.date),
   };
 }
 
@@ -177,6 +194,7 @@ function rememberInboxEntry(notification: NotificationData) {
     reaction: notification.reaction,
     isSilent: notification.isSilent,
     shouldReplaceHistory: notification.shouldReplaceHistory,
+    sentAt: earliestSentAt(previous?.sentAt, notification.sentAt),
   });
 
   while (inboxByChatKey.size > MAX_INBOX_CHATS) {
@@ -201,6 +219,10 @@ function buildGroupedNotification(shouldAlert: boolean) {
       return `${entry.title}: ${latestBody}`;
     }).join('\n');
   const messageCount = entries.reduce((sum, entry) => sum + entry.bodies.length, 0);
+  const sentAt = entries.reduce<number | undefined>(
+    (oldest, entry) => earliestSentAt(oldest, entry.sentAt),
+    undefined,
+  );
 
   const options: NotificationOptions = {
     body,
@@ -215,6 +237,7 @@ function buildGroupedNotification(shouldAlert: boolean) {
     badge: 'icon-192x192.png',
     tag: APP_NOTIFICATION_TAG,
     silent: !shouldAlert,
+    timestamp: sentAt,
   };
 
   if (shouldAlert) {

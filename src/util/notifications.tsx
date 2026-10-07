@@ -502,6 +502,7 @@ export async function notifyAboutMessage({
           shouldReplaceHistory: true,
           isSilent: isSilent || message.isSilent,
           reaction: activeReaction?.reaction,
+          sentAt: message.date ? message.date * SECONDS_TO_MS : undefined,
         },
       });
     }
@@ -513,6 +514,7 @@ export async function notifyAboutMessage({
       icon,
       messageId: message.id,
       isSilent: isSilent || message.isSilent || isReaction,
+      sentAt: message.date ? message.date * SECONDS_TO_MS : undefined,
     });
   }
 }
@@ -520,6 +522,7 @@ export async function notifyAboutMessage({
 const PAGE_NOTIFICATION_TAG = 'justchat';
 const MAX_PAGE_INBOX_CHATS = 8;
 const MAX_PAGE_LINES_PER_CHAT = 5;
+const SECONDS_TO_MS = 1000;
 
 type PageInboxEntry = {
   chatId: string;
@@ -527,10 +530,17 @@ type PageInboxEntry = {
   bodies: string[];
   messageId: number;
   icon?: string;
+  sentAt?: number;
 };
 
 const pageInboxByChatId = new Map<string, PageInboxEntry>();
 let activePageNotification: Notification | undefined;
+
+function earliestSentAt(current?: number, next?: number) {
+  if (current === undefined) return next;
+  if (next === undefined) return current;
+  return Math.min(current, next);
+}
 
 function showGroupedPageNotification({
   chatId,
@@ -539,6 +549,7 @@ function showGroupedPageNotification({
   icon,
   messageId,
   isSilent,
+  sentAt,
 }: {
   chatId: string;
   title: string;
@@ -546,6 +557,7 @@ function showGroupedPageNotification({
   icon?: string;
   messageId: number;
   isSilent?: boolean;
+  sentAt?: number;
 }) {
   const previous = pageInboxByChatId.get(chatId);
   if (previous?.messageId === messageId) return;
@@ -558,6 +570,7 @@ function showGroupedPageNotification({
     bodies,
     messageId,
     icon: icon || previous?.icon,
+    sentAt: earliestSentAt(previous?.sentAt, sentAt),
   });
 
   while (pageInboxByChatId.size > MAX_PAGE_INBOX_CHATS) {
@@ -572,12 +585,17 @@ function showGroupedPageNotification({
   const notificationBody = onlyEntry
     ? onlyEntry.bodies.join('\n')
     : entries.map((entry) => `${entry.title}: ${entry.bodies[entry.bodies.length - 1]}`).join('\n');
+  const notificationSentAt = entries.reduce<number | undefined>(
+    (oldest, entry) => earliestSentAt(oldest, entry.sentAt),
+    undefined,
+  );
   const options: NotificationOptions = {
     body: notificationBody,
     icon: onlyEntry?.icon || icon,
     badge: onlyEntry?.icon || icon,
     tag: PAGE_NOTIFICATION_TAG,
     silent: Boolean(isSilent),
+    timestamp: notificationSentAt,
   };
 
   if (!isSilent && 'vibrate' in navigator) {
