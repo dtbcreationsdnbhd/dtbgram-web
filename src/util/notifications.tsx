@@ -502,47 +502,147 @@ export async function notifyAboutMessage({
           shouldReplaceHistory: true,
           isSilent: isSilent || message.isSilent,
           reaction: activeReaction?.reaction,
+          sentAt: message.date ? message.date * SECONDS_TO_MS : undefined,
         },
       });
     }
   } else {
-    const dispatch = getActions();
-    const options: NotificationOptions = {
+    showGroupedPageNotification({
+      chatId: chat.id,
+      title,
       body,
       icon,
-      badge: icon,
-      tag: String(message.id),
-    };
-
-    if ('vibrate' in navigator) {
-      // @ts-ignore
-      options.vibrate = [200, 100, 200];
-    }
-
-    const notification = new Notification(title, options);
-
-    notification.onclick = () => {
-      notification.close();
-      dispatch.focusMessage({
-        chatId: chat.id,
-        messageId: message.id!,
-        shouldReplaceHistory: true,
-      });
-      if (window.focus) {
-        window.focus();
-      }
-    };
-
-    // Play sound when notification is displayed
-    notification.onshow = () => {
-      // TODO Update when reaction badges are implemented
-      if (isSilent || isReaction || message.isSilent || IS_TAURI) return;
-      playNotifySoundDebounced(String(message.id) || chat.id);
-    };
+      messageId: message.id,
+      isSilent: isSilent || message.isSilent || isReaction,
+      sentAt: message.date ? message.date * SECONDS_TO_MS : undefined,
+    });
   }
 }
 
+const PAGE_NOTIFICATION_TAG = 'justchat';
+const MAX_PAGE_INBOX_CHATS = 8;
+const MAX_PAGE_LINES_PER_CHAT = 5;
+const SECONDS_TO_MS = 1000;
+
+type PageInboxEntry = {
+  chatId: string;
+  title: string;
+  bodies: string[];
+  messageId: number;
+  icon?: string;
+  sentAt?: number;
+};
+
+const pageInboxByChatId = new Map<string, PageInboxEntry>();
+let activePageNotification: Notification | undefined;
+
+function earliestSentAt(current?: number, next?: number) {
+  if (current === undefined) return next;
+  if (next === undefined) return current;
+  return Math.min(current, next);
+}
+
+function showGroupedPageNotification({
+  chatId,
+  title,
+  body,
+  icon,
+  messageId,
+  isSilent,
+  sentAt,
+}: {
+  chatId: string;
+  title: string;
+  body: string;
+  icon?: string;
+  messageId: number;
+  isSilent?: boolean;
+  sentAt?: number;
+}) {
+  const previous = pageInboxByChatId.get(chatId);
+  if (previous?.messageId === messageId) return;
+
+  const bodies = [...(previous?.bodies || []), body].slice(-MAX_PAGE_LINES_PER_CHAT);
+  pageInboxByChatId.delete(chatId);
+  pageInboxByChatId.set(chatId, {
+    chatId,
+    title,
+    bodies,
+    messageId,
+    icon: icon || previous?.icon,
+    sentAt: earliestSentAt(previous?.sentAt, sentAt),
+  });
+
+  while (pageInboxByChatId.size > MAX_PAGE_INBOX_CHATS) {
+    const oldestKey = pageInboxByChatId.keys().next().value;
+    if (!oldestKey) break;
+    pageInboxByChatId.delete(oldestKey);
+  }
+
+  const entries = Array.from(pageInboxByChatId.values()).reverse();
+  const onlyEntry = entries.length === 1 ? entries[0] : undefined;
+  const notificationTitle = onlyEntry ? onlyEntry.title : APP_NAME;
+  const notificationBody = onlyEntry
+    ? onlyEntry.bodies.join('\n')
+    : entries.map((entry) => `${entry.title}: ${entry.bodies[entry.bodies.length - 1]}`).join('\n');
+  const notificationSentAt = entries.reduce<number | undefined>(
+    (oldest, entry) => earliestSentAt(oldest, entry.sentAt),
+    undefined,
+  );
+  const options: NotificationOptions = {
+    body: notificationBody,
+    icon: onlyEntry?.icon || icon,
+    badge: onlyEntry?.icon || icon,
+    tag: PAGE_NOTIFICATION_TAG,
+    silent: Boolean(isSilent),
+    timestamp: notificationSentAt,
+  };
+
+  if (!isSilent && 'vibrate' in navigator) {
+    // @ts-ignore
+    options.vibrate = [200, 100, 200];
+    // @ts-ignore
+    options.renotify = true;
+  }
+
+  activePageNotification?.close();
+  const dispatch = getActions();
+  const notification = new Notification(notificationTitle, options);
+  activePageNotification = notification;
+  notification.onclick = () => {
+    notification.close();
+    activePageNotification = undefined;
+    pageInboxByChatId.clear();
+    if (onlyEntry) {
+      dispatch.focusMessage({
+        chatId: onlyEntry.chatId,
+        messageId: onlyEntry.messageId,
+        shouldReplaceHistory: true,
+      });
+    }
+    if (window.focus) {
+      window.focus();
+    }
+  };
+
+  notification.onshow = () => {
+    if (isSilent || IS_TAURI) return;
+    playNotifySoundDebounced(String(messageId) || chatId);
+  };
+}
+
 export function closeMessageNotifications(payload: { chatId: string; lastReadInboxMessageId?: number }) {
+  const entry = pageInboxByChatId.get(payload.chatId);
+  const lastMessageId = payload.lastReadInboxMessageId || Number.MAX_VALUE;
+  if (!entry || entry.messageId <= lastMessageId) {
+    pageInboxByChatId.delete(payload.chatId);
+  }
+
+  if (!pageInboxByChatId.size) {
+    activePageNotification?.close();
+    activePageNotification = undefined;
+  }
+
   if (IS_TEST || !navigator.serviceWorker?.controller) return;
   navigator.serviceWorker.controller.postMessage({
     type: 'closeMessageNotifications',
