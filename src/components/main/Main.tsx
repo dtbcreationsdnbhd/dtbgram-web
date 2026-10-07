@@ -558,6 +558,7 @@ const Main = ({
     shouldSkipHistoryAnimations && 'history-animation-disabled',
     isFullscreen && 'is-fullscreen',
     isFoldersSidebarShown && 'folders-sidebar-visible',
+    isMiddleColumnOpen && 'middle-column-open',
   );
 
   const handleBlur = useLastCallback(() => {
