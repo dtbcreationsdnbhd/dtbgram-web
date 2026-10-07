@@ -50,7 +50,22 @@ type CloseNotificationData = {
   chatId: string;
 };
 
-let lastSyncAt = new Date().valueOf();
+const APP_NOTIFICATION_TAG = 'justchat';
+const MAX_INBOX_CHATS = 8;
+const MAX_LINES_PER_CHAT = 5;
+
+type InboxEntry = {
+  chatId?: string;
+  title: string;
+  bodies: string[];
+  messageId?: number;
+  icon?: string;
+  reaction?: string;
+  isSilent?: boolean;
+  shouldReplaceHistory?: boolean;
+};
+
+const inboxByChatKey = new Map<string, InboxEntry>();
 const shownNotifications = new Set();
 const clickBuffer: Record<string, NotificationData> = {};
 
@@ -140,38 +155,106 @@ async function playNotificationSound(id: string) {
   });
 }
 
-function showNotification({
-  chatId,
-  messageId,
-  body,
-  title,
-  icon,
-  reaction,
-  isSilent,
-  shouldReplaceHistory,
-}: NotificationData) {
-  const isFirstBatch = new Date().valueOf() - lastSyncAt < 1000;
-  const tag = String(isFirstBatch ? 0 : chatId || 0);
+function getInboxKey(chatId?: string) {
+  return chatId || '0';
+}
+
+function rememberInboxEntry(notification: NotificationData) {
+  const key = getInboxKey(notification.chatId);
+  const previous = inboxByChatKey.get(key);
+  if (previous && notification.messageId && previous.messageId === notification.messageId) {
+    return;
+  }
+
+  const bodies = [...(previous?.bodies || []), notification.body].slice(-MAX_LINES_PER_CHAT);
+  inboxByChatKey.delete(key);
+  inboxByChatKey.set(key, {
+    chatId: notification.chatId,
+    title: notification.title,
+    bodies,
+    messageId: notification.messageId,
+    icon: notification.icon || previous?.icon,
+    reaction: notification.reaction,
+    isSilent: notification.isSilent,
+    shouldReplaceHistory: notification.shouldReplaceHistory,
+  });
+
+  while (inboxByChatKey.size > MAX_INBOX_CHATS) {
+    const oldestKey = inboxByChatKey.keys().next().value;
+    if (!oldestKey) break;
+    inboxByChatKey.delete(oldestKey);
+  }
+}
+
+function listInboxEntries() {
+  return Array.from(inboxByChatKey.values()).reverse();
+}
+
+function buildGroupedNotification(shouldAlert: boolean) {
+  const entries = listInboxEntries();
+  const onlyEntry = entries.length === 1 ? entries[0] : undefined;
+  const title = onlyEntry ? onlyEntry.title : APP_NAME;
+  const body = onlyEntry
+    ? onlyEntry.bodies.join('\n')
+    : entries.map((entry) => {
+      const latestBody = entry.bodies[entry.bodies.length - 1];
+      return `${entry.title}: ${latestBody}`;
+    }).join('\n');
+  const messageCount = entries.reduce((sum, entry) => sum + entry.bodies.length, 0);
+
   const options: NotificationOptions = {
     body,
     data: {
-      chatId,
-      messageId,
-      reaction,
-      count: 1,
-      shouldReplaceHistory,
+      chatId: onlyEntry?.chatId,
+      messageId: onlyEntry?.messageId,
+      reaction: onlyEntry?.reaction,
+      count: messageCount,
+      shouldReplaceHistory: onlyEntry?.shouldReplaceHistory,
     },
-    icon: icon || 'icon-192x192.png',
+    icon: onlyEntry?.icon || 'icon-192x192.png',
     badge: 'icon-192x192.png',
-    tag,
-    // @ts-ignore
-    vibrate: [200, 100, 200],
+    tag: APP_NOTIFICATION_TAG,
+    silent: !shouldAlert,
   };
+
+  if (shouldAlert) {
+    // @ts-ignore
+    options.vibrate = [200, 100, 200];
+    // Same tag must alert again when another chat or message arrives
+    // @ts-ignore
+    options.renotify = true;
+  }
+
+  return { title, options };
+}
+
+async function publishInbox(shouldAlert: boolean) {
+  const notifications = await self.registration.getNotifications();
+  notifications.forEach((notification) => {
+    if (notification.tag !== APP_NOTIFICATION_TAG) {
+      notification.close();
+    }
+  });
+
+  if (!inboxByChatKey.size) {
+    notifications.forEach((notification) => notification.close());
+    return undefined;
+  }
+
+  const { title, options } = buildGroupedNotification(shouldAlert);
+  return self.registration.showNotification(title, options);
+}
+
+function showNotification(notification: NotificationData) {
+  rememberInboxEntry(notification);
+  const shouldAlert = !notification.reaction && !notification.isSilent;
 
   return Promise.all([
     // TODO Update condition when reaction badges are implemented
-    (!reaction && !isSilent) ? playNotificationSound(String(messageId) || chatId || '') : undefined,
-    self.registration.showNotification(title, options),
+    shouldAlert
+      ? playNotificationSound(String(notification.messageId) || notification.chatId || '')
+      : undefined,
+    publishInbox(shouldAlert),
   ]);
 }
 
@@ -179,16 +262,13 @@ async function closeNotifications({
   chatId,
   lastReadInboxMessageId,
 }: CloseNotificationData) {
-  const notifications = await self.registration.getNotifications();
+  const entry = inboxByChatKey.get(getInboxKey(chatId));
   const lastMessageId = lastReadInboxMessageId || Number.MAX_VALUE;
-  notifications.forEach((notification) => {
-    if (
-      notification.tag === '0'
-      || (notification.data.chatId === chatId && notification.data.messageId <= lastMessageId)
-    ) {
-      notification.close();
-    }
-  });
+  if (!entry || entry.messageId === undefined || entry.messageId <= lastMessageId) {
+    inboxByChatKey.delete(getInboxKey(chatId));
+  }
+
+  await publishInbox(false);
 }
 
 export function handlePush(e: PushEvent) {
@@ -293,11 +373,6 @@ export function handleClientMessage(e: ExtendableMessageEvent) {
     // store messageId for already shown notification
     const notification: NotificationData = e.data.payload;
     e.waitUntil((async () => {
-      // Close existing notification if it is already shown
-      if (notification.chatId) {
-        const notifications = await self.registration.getNotifications({ tag: notification.chatId });
-        notifications.forEach((n) => n.close());
-      }
       // Mark this notification as shown if it was handled locally
       shownNotifications.add(notification.messageId);
       return showNotification(notification);
@@ -308,7 +383,3 @@ export function handleClientMessage(e: ExtendableMessageEvent) {
     e.waitUntil(closeNotifications(e.data.payload));
   }
 }
-
-self.addEventListener('sync', () => {
-  lastSyncAt = Date.now();
-});
