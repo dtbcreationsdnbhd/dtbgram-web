@@ -172,6 +172,13 @@
       transform: translate3d(0, 0, 0);
     }
 
+    // The conversation pane is transparent, and the wallpaper sits behind this list.
+    // Once a chat is open, drop the list behind the wallpaper so it cannot show through.
+    #Main.middle-column-open:not(.left-column-open):not(.left-column-animating) & {
+      z-index: -2;
+      visibility: hidden;
+    }
+
     #Main.history-animation-disabled & {
       transition: none;
 
