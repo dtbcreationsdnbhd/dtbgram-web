@@ -536,10 +536,15 @@ type PageInboxEntry = {
 const pageInboxByChatId = new Map<string, PageInboxEntry>();
 let activePageNotification: Notification | undefined;
 
-function earliestSentAt(current?: number, next?: number) {
+function latestSentAt(current?: number, next?: number) {
   if (current === undefined) return next;
   if (next === undefined) return current;
-  return Math.min(current, next);
+  return Math.max(current, next);
+}
+
+function clampNotificationTimestamp(sentAt?: number) {
+  if (!sentAt) return undefined;
+  return Math.min(sentAt, Date.now());
 }
 
 function showGroupedPageNotification({
@@ -570,7 +575,7 @@ function showGroupedPageNotification({
     bodies,
     messageId,
     icon: icon || previous?.icon,
-    sentAt: earliestSentAt(previous?.sentAt, sentAt),
+    sentAt: latestSentAt(previous?.sentAt, sentAt),
   });
 
   while (pageInboxByChatId.size > MAX_PAGE_INBOX_CHATS) {
@@ -585,18 +590,21 @@ function showGroupedPageNotification({
   const notificationBody = onlyEntry
     ? onlyEntry.bodies.join('\n')
     : entries.map((entry) => `${entry.title}: ${entry.bodies[entry.bodies.length - 1]}`).join('\n');
-  const notificationSentAt = entries.reduce<number | undefined>(
-    (oldest, entry) => earliestSentAt(oldest, entry.sentAt),
+  const notificationSentAt = clampNotificationTimestamp(entries.reduce<number | undefined>(
+    (latest, entry) => latestSentAt(latest, entry.sentAt),
     undefined,
-  );
+  ));
   const options: NotificationOptions = {
     body: notificationBody,
     icon: onlyEntry?.icon || icon,
     badge: onlyEntry?.icon || icon,
     tag: PAGE_NOTIFICATION_TAG,
     silent: Boolean(isSilent),
-    timestamp: notificationSentAt,
   };
+
+  if (notificationSentAt) {
+    options.timestamp = notificationSentAt;
+  }
 
   if (!isSilent && 'vibrate' in navigator) {
     // @ts-ignore
@@ -607,7 +615,16 @@ function showGroupedPageNotification({
 
   activePageNotification?.close();
   const dispatch = getActions();
-  const notification = new Notification(notificationTitle, options);
+  let notification: Notification;
+  try {
+    notification = new Notification(notificationTitle, options);
+  } catch (err) {
+    notification = new Notification(notificationTitle, {
+      ...options,
+      timestamp: undefined,
+      renotify: undefined,
+    });
+  }
   activePageNotification = notification;
   notification.onclick = () => {
     notification.close();
@@ -632,11 +649,12 @@ function showGroupedPageNotification({
 }
 
 export function closeMessageNotifications(payload: { chatId: string; lastReadInboxMessageId?: number }) {
+  if (!payload.lastReadInboxMessageId) return;
+
   const entry = pageInboxByChatId.get(payload.chatId);
-  const lastMessageId = payload.lastReadInboxMessageId || Number.MAX_VALUE;
-  if (!entry || entry.messageId <= lastMessageId) {
-    pageInboxByChatId.delete(payload.chatId);
-  }
+  if (entry && entry.messageId > payload.lastReadInboxMessageId) return;
+
+  pageInboxByChatId.delete(payload.chatId);
 
   if (!pageInboxByChatId.size) {
     activePageNotification?.close();

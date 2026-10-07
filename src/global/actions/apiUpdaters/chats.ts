@@ -87,10 +87,10 @@ addActionHandler('apiUpdate', (global, actions, update): ActionReturnType => {
         actions.loadTopChats();
       }
 
-      if (update.chat.id) {
+      if (update.chat.id && update.readState?.lastReadInboxMessageId) {
         closeMessageNotifications({
           chatId: update.chat.id,
-          lastReadInboxMessageId: update.readState?.lastReadInboxMessageId,
+          lastReadInboxMessageId: update.readState.lastReadInboxMessageId,
         });
       }
 

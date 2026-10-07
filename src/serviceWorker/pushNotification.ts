@@ -130,10 +130,16 @@ function toNotificationTimestamp(date?: number) {
   return date < UNIX_MS_THRESHOLD ? date * SECONDS_TO_MS : date;
 }
 
-function earliestSentAt(current?: number, next?: number) {
+function latestSentAt(current?: number, next?: number) {
   if (current === undefined) return next;
   if (next === undefined) return current;
-  return Math.min(current, next);
+  return Math.max(current, next);
+}
+
+// A timestamp ahead of the device clock is rejected by `showNotification`, so the alert never appears.
+function clampNotificationTimestamp(sentAt?: number) {
+  if (!sentAt) return undefined;
+  return Math.min(sentAt, Date.now());
 }
 
 function getNotificationData(data: PushData): NotificationData {
@@ -180,7 +186,7 @@ function rememberInboxEntry(notification: NotificationData) {
   const key = getInboxKey(notification.chatId);
   const previous = inboxByChatKey.get(key);
   if (previous && notification.messageId && previous.messageId === notification.messageId) {
-    return;
+    return false;
   }
 
   const bodies = [...(previous?.bodies || []), notification.body].slice(-MAX_LINES_PER_CHAT);
@@ -194,7 +200,7 @@ function rememberInboxEntry(notification: NotificationData) {
     reaction: notification.reaction,
     isSilent: notification.isSilent,
     shouldReplaceHistory: notification.shouldReplaceHistory,
-    sentAt: earliestSentAt(previous?.sentAt, notification.sentAt),
+    sentAt: latestSentAt(previous?.sentAt, notification.sentAt),
   });
 
   while (inboxByChatKey.size > MAX_INBOX_CHATS) {
@@ -202,27 +208,23 @@ function rememberInboxEntry(notification: NotificationData) {
     if (!oldestKey) break;
     inboxByChatKey.delete(oldestKey);
   }
-}
 
-function listInboxEntries() {
-  return Array.from(inboxByChatKey.values()).reverse();
+  return true;
 }
 
 function buildGroupedNotification(shouldAlert: boolean) {
-  const entries = listInboxEntries();
+  const entries = Array.from(inboxByChatKey.values()).reverse();
   const onlyEntry = entries.length === 1 ? entries[0] : undefined;
   const title = onlyEntry ? onlyEntry.title : APP_NAME;
+  // One row per sender, newest chat first
   const body = onlyEntry
     ? onlyEntry.bodies.join('\n')
-    : entries.map((entry) => {
-      const latestBody = entry.bodies[entry.bodies.length - 1];
-      return `${entry.title}: ${latestBody}`;
-    }).join('\n');
+    : entries.map((entry) => `${entry.title}: ${entry.bodies[entry.bodies.length - 1]}`).join('\n');
   const messageCount = entries.reduce((sum, entry) => sum + entry.bodies.length, 0);
-  const sentAt = entries.reduce<number | undefined>(
-    (oldest, entry) => earliestSentAt(oldest, entry.sentAt),
+  const sentAt = clampNotificationTimestamp(entries.reduce<number | undefined>(
+    (latest, entry) => latestSentAt(latest, entry.sentAt),
     undefined,
-  );
+  ));
 
   const options: NotificationOptions = {
     body,
@@ -237,13 +239,16 @@ function buildGroupedNotification(shouldAlert: boolean) {
     badge: 'icon-192x192.png',
     tag: APP_NOTIFICATION_TAG,
     silent: !shouldAlert,
-    timestamp: sentAt,
   };
+
+  if (sentAt) {
+    options.timestamp = sentAt;
+  }
 
   if (shouldAlert) {
     // @ts-ignore
     options.vibrate = [200, 100, 200];
-    // Same tag must alert again when another chat or message arrives
+    // Replacing the card must still alert when another message arrives
     // @ts-ignore
     options.renotify = true;
   }
@@ -254,22 +259,29 @@ function buildGroupedNotification(shouldAlert: boolean) {
 async function publishInbox(shouldAlert: boolean) {
   const notifications = await self.registration.getNotifications();
   notifications.forEach((notification) => {
-    if (notification.tag !== APP_NOTIFICATION_TAG) {
+    if (notification.tag !== APP_NOTIFICATION_TAG || !inboxByChatKey.size) {
       notification.close();
     }
   });
 
-  if (!inboxByChatKey.size) {
-    notifications.forEach((notification) => notification.close());
-    return undefined;
-  }
+  if (!inboxByChatKey.size) return;
 
   const { title, options } = buildGroupedNotification(shouldAlert);
-  return self.registration.showNotification(title, options);
+  try {
+    await self.registration.showNotification(title, options);
+  } catch (err) {
+    // A rejected timestamp or `renotify` must not swallow the alert
+    await self.registration.showNotification(title, {
+      ...options,
+      timestamp: undefined,
+      renotify: undefined,
+    });
+  }
 }
 
 function showNotification(notification: NotificationData) {
-  rememberInboxEntry(notification);
+  if (!rememberInboxEntry(notification)) return undefined;
+
   const shouldAlert = !notification.reaction && !notification.isSilent;
 
   return Promise.all([
@@ -285,12 +297,14 @@ async function closeNotifications({
   chatId,
   lastReadInboxMessageId,
 }: CloseNotificationData) {
-  const entry = inboxByChatKey.get(getInboxKey(chatId));
-  const lastMessageId = lastReadInboxMessageId || Number.MAX_VALUE;
-  if (!entry || entry.messageId === undefined || entry.messageId <= lastMessageId) {
-    inboxByChatKey.delete(getInboxKey(chatId));
-  }
+  // Only an inbox read cursor dismisses the alert
+  if (!lastReadInboxMessageId) return;
 
+  const key = getInboxKey(chatId);
+  const entry = inboxByChatKey.get(key);
+  if (!entry || (entry.messageId !== undefined && entry.messageId > lastReadInboxMessageId)) return;
+
+  inboxByChatKey.delete(key);
   await publishInbox(false);
 }
 
@@ -396,9 +410,9 @@ export function handleClientMessage(e: ExtendableMessageEvent) {
     // store messageId for already shown notification
     const notification: NotificationData = e.data.payload;
     e.waitUntil((async () => {
-      // Mark this notification as shown if it was handled locally
+      await showNotification(notification);
+      // Mark only after a successful show, so a failed attempt can still arrive via push.
       shownNotifications.add(notification.messageId);
-      return showNotification(notification);
     })());
   }
 
