@@ -323,7 +323,7 @@ export interface ActionPayloads {
   clearWebPagePreview: WithTabId | undefined;
   loadWallpapers: undefined;
   uploadWallpaper: File;
-  setDeviceToken: { token: string };
+  setDeviceToken: { token: string; wakeUrl?: string };
   deleteDeviceToken: undefined;
   createServiceNotification: {
     message: ApiMessage;
