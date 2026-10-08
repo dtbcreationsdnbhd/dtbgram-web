@@ -187,17 +187,7 @@ async function unsubscribeFromPush(subscription: PushSubscription | null) {
   const { deleteDeviceToken } = getActions();
   const { wakeUrl, deviceToken } = getGlobal().push || {};
   if (wakeUrl) {
-    try {
-      await callApi('unregisterDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
-      if (deviceToken) {
-        await callApi('unregisterDevice', buildRelayWebPushToken(deviceToken, wakeUrl), TELEGRAM_TOKEN_TYPE_WEB_PUSH);
-      }
-    } catch (error) {
-      if (DEBUG) {
-        // eslint-disable-next-line no-console
-        console.log('[PUSH] Unable to unregister Telegram device.', error);
-      }
-    }
+    await unregisterTelegramPush(wakeUrl, deviceToken);
   }
   if (subscription) {
     try {
@@ -762,18 +752,33 @@ async function ensureRelayPushRegistration(subscription: PushSubscription | null
   if (!subscription) return;
 
   const deviceToken = getDeviceToken(subscription);
-  const savedWakeUrl = getGlobal().push?.wakeUrl;
-  if (savedWakeUrl) {
-    await registerRelayWebPush(deviceToken, savedWakeUrl);
-    return;
-  }
-
-  const wakeUrl = await registerSimplePushWakeUrl(deviceToken);
+  const { wakeUrl: savedWakeUrl, deviceToken: savedDeviceToken } = getGlobal().push || {};
+  // The platform issues one wake URL per device, so a different URL replaces the saved registration
+  const wakeUrl = await registerSimplePushWakeUrl(deviceToken) || savedWakeUrl;
   if (!wakeUrl) return;
 
+  if (savedWakeUrl && savedWakeUrl !== wakeUrl) {
+    await unregisterTelegramPush(savedWakeUrl, savedDeviceToken);
+  }
   await callApi('registerDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
   await registerRelayWebPush(deviceToken, wakeUrl);
-  getActions().setDeviceToken({ token: deviceToken, wakeUrl });
+  if (wakeUrl !== savedWakeUrl || deviceToken !== savedDeviceToken) {
+    getActions().setDeviceToken({ token: deviceToken, wakeUrl });
+  }
+}
+
+async function unregisterTelegramPush(wakeUrl: string, deviceToken?: string) {
+  try {
+    await callApi('unregisterDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
+    if (deviceToken) {
+      await callApi('unregisterDevice', buildRelayWebPushToken(deviceToken, wakeUrl), TELEGRAM_TOKEN_TYPE_WEB_PUSH);
+    }
+  } catch (error) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.log('[PUSH] Unable to unregister Telegram device.', error);
+    }
+  }
 }
 
 async function registerRelayWebPush(deviceToken: string, wakeUrl: string) {

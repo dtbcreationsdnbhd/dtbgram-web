@@ -35,7 +35,8 @@ const DEFAULT_TTL_SECONDS = '86400';
 // Headers the device needs to decrypt a Telegram web push payload
 const ENCRYPTION_HEADERS = ['content-encoding', 'encryption', 'crypto-key'];
 
-const secretByUserId = new Map<string, string>();
+// Keyed by user and push endpoint, so every device of a user has its own wake URL
+const secretByDevice = new Map<string, string>();
 const pushBySecret = new Map<string, StoredPush>();
 
 export default function buildWebPushRelayPlugin({
@@ -103,10 +104,11 @@ async function handleSubscribe(
     return;
   }
 
-  let secret = secretByUserId.get(telegramUserId);
+  const deviceKey = `${telegramUserId}:${subscription.endpoint}`;
+  let secret = secretByDevice.get(deviceKey);
   if (!secret) {
     secret = randomBytes(SECRET_BYTES).toString('hex');
-    secretByUserId.set(telegramUserId, secret);
+    secretByDevice.set(deviceKey, secret);
   }
   pushBySecret.set(secret, { telegramUserId, subscription });
 
