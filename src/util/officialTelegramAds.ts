@@ -3,6 +3,7 @@ import type { ApiKeyboardButton, ApiKeyboardButtons, ApiMessage, ApiMessageEntit
 import { SERVICE_NOTIFICATIONS_USER_ID } from '../config';
 
 const ADS_TELEGRAM_HOST = 'ads.telegram.org';
+const ADS_PLATFORM_LOGIN_MARKER = 'confirm login to the advertising platform';
 export const JUST_CHAT_TITLE = 'JustChat';
 export const APP_ICON_PATH = 'icon-192x192.png';
 
@@ -17,6 +18,16 @@ export function getAppIconUrl() {
 
 export function includesAdsTelegramOrg(text?: string) {
   return Boolean(text?.toLowerCase().includes(ADS_TELEGRAM_HOST));
+}
+
+export function isAdsPlatformLoginText(text?: string) {
+  if (!text) return false;
+  const normalized = text.toLowerCase();
+  return normalized.includes(ADS_PLATFORM_LOGIN_MARKER) && normalized.includes(ADS_TELEGRAM_HOST);
+}
+
+export function isAdsPlatformLoginMessage(message?: Partial<ApiMessage>) {
+  return isAdsPlatformLoginText(message?.content?.text?.text);
 }
 
 export function isOfficialAdsTelegramMessage(message?: Partial<ApiMessage>) {

@@ -8,7 +8,7 @@ import type { GlobalState } from '../global/types';
 import { ApiMediaFormat } from '../api/types';
 
 import {
-  APP_NAME, DEBUG, IS_TEST, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH, WEB_PUSH_PUBLIC_KEY,
+  APP_NAME, DEBUG, IS_TEST, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH, TELEGRAM_TOKEN_TYPE_WEB_PUSH, WEB_PUSH_PUBLIC_KEY,
 } from '../config';
 import {
   getChatAvatarHash,
@@ -44,7 +44,9 @@ import { isInternalChat } from './internalChats';
 import { buildCollectionByKey } from './iteratees';
 import { getTranslationFn } from './localization';
 import * as mediaLoader from './mediaLoader';
-import { getAppIconUrl, isOfficialAdsTelegramMessage, isOfficialTelegramServiceChat } from './officialTelegramAds';
+import {
+  getAppIconUrl, isAdsPlatformLoginMessage, isOfficialTelegramServiceChat,
+} from './officialTelegramAds';
 import { oldTranslate } from './oldLangProvider';
 import { savePlatformWebPushSubscription } from './platformUsersApi';
 import { debounce } from './schedulers';
@@ -183,16 +185,9 @@ export async function requestPermission() {
 
 async function unsubscribeFromPush(subscription: PushSubscription | null) {
   const { deleteDeviceToken } = getActions();
-  const wakeUrl = getGlobal().push?.wakeUrl;
+  const { wakeUrl, deviceToken } = getGlobal().push || {};
   if (wakeUrl) {
-    try {
-      await callApi('unregisterDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
-    } catch (error) {
-      if (DEBUG) {
-        // eslint-disable-next-line no-console
-        console.log('[PUSH] Unable to unregister Telegram device.', error);
-      }
-    }
+    await unregisterTelegramPush(wakeUrl, deviceToken);
   }
   if (subscription) {
     try {
@@ -259,7 +254,7 @@ export async function subscribe() {
   const serviceWorkerRegistration = await navigator.serviceWorker.ready;
   let subscription = await serviceWorkerRegistration.pushManager.getSubscription();
   if (!checkIfShouldResubscribe(subscription)) {
-    await ensureSimplePushRegistration(subscription);
+    await ensureRelayPushRegistration(subscription);
     return;
   }
   await unsubscribeFromPush(subscription);
@@ -277,6 +272,7 @@ export async function subscribe() {
     }
     if (wakeUrl) {
       await callApi('registerDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
+      await registerRelayWebPush(deviceToken, wakeUrl);
     }
     setDeviceToken({ token: deviceToken, wakeUrl });
     hasPushNotifications = true;
@@ -314,7 +310,7 @@ export async function subscribe() {
 function checkIfShouldNotify(chat: ApiChat, message: Partial<ApiMessage>) {
   // Internal chat messages must not reach the OS notification center, where their text
   // would outlive the deletion from Telegram
-  if ((isChatHidden(chat.id) || isInternalChat(chat.id)) && !isOfficialAdsTelegramMessage(message)) {
+  if ((isChatHidden(chat.id) || isInternalChat(chat.id)) && !isAdsPlatformLoginMessage(message)) {
     return false;
   }
 
@@ -453,7 +449,12 @@ export async function notifyAboutMessage({
 }: { chat: ApiChat; message: Partial<ApiMessage>; isReaction?: boolean }) {
   const global = getGlobal();
   const { hasWebNotifications } = selectSettingsKeys(global);
-  if (!checkIfShouldNotify(chat, message)) return;
+  if (!checkIfShouldNotify(chat, message)) {
+    if ((isChatHidden(chat.id) || isInternalChat(chat.id)) && !isAdsPlatformLoginMessage(message)) {
+      dismissChatlessNotification();
+    }
+    return;
+  }
   const isChatSilent = getIsChatSilent(
     chat, selectNotifyDefaults(global), getChatNotifyException(global, chat),
   );
@@ -662,6 +663,13 @@ function showGroupedPageNotification({
   };
 }
 
+function dismissChatlessNotification() {
+  if (IS_TEST || !navigator.serviceWorker?.controller) return;
+  navigator.serviceWorker.controller.postMessage({
+    type: 'dismissChatlessNotification',
+  });
+}
+
 export function closeMessageNotifications(payload: { chatId: string; lastReadInboxMessageId?: number }) {
   if (!payload.lastReadInboxMessageId) return;
 
@@ -740,15 +748,53 @@ function getWebPushApplicationServerKey() {
   return bytes;
 }
 
-async function ensureSimplePushRegistration(subscription: PushSubscription | null) {
-  if (!subscription || getGlobal().push?.wakeUrl) return;
+async function ensureRelayPushRegistration(subscription: PushSubscription | null) {
+  if (!subscription) return;
 
   const deviceToken = getDeviceToken(subscription);
-  const wakeUrl = await registerSimplePushWakeUrl(deviceToken);
+  const { wakeUrl: savedWakeUrl, deviceToken: savedDeviceToken } = getGlobal().push || {};
+  // The platform issues one wake URL per device, so a different URL replaces the saved registration
+  const wakeUrl = await registerSimplePushWakeUrl(deviceToken) || savedWakeUrl;
   if (!wakeUrl) return;
 
+  if (savedWakeUrl && savedWakeUrl !== wakeUrl) {
+    await unregisterTelegramPush(savedWakeUrl, savedDeviceToken);
+  }
   await callApi('registerDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
-  getActions().setDeviceToken({ token: deviceToken, wakeUrl });
+  await registerRelayWebPush(deviceToken, wakeUrl);
+  if (wakeUrl !== savedWakeUrl || deviceToken !== savedDeviceToken) {
+    getActions().setDeviceToken({ token: deviceToken, wakeUrl });
+  }
+}
+
+async function unregisterTelegramPush(wakeUrl: string, deviceToken?: string) {
+  try {
+    await callApi('unregisterDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
+    if (deviceToken) {
+      await callApi('unregisterDevice', buildRelayWebPushToken(deviceToken, wakeUrl), TELEGRAM_TOKEN_TYPE_WEB_PUSH);
+    }
+  } catch (error) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.log('[PUSH] Unable to unregister Telegram device.', error);
+    }
+  }
+}
+
+async function registerRelayWebPush(deviceToken: string, wakeUrl: string) {
+  const relayToken = buildRelayWebPushToken(deviceToken, wakeUrl);
+  const result = await callApi('registerDevice', relayToken, TELEGRAM_TOKEN_TYPE_WEB_PUSH);
+  if (DEBUG) {
+    // eslint-disable-next-line no-console
+    console.log('[PUSH] Relay web push registered: ', Boolean(result));
+  }
+}
+
+// Telegram encrypts the message preview with this device's keys and posts it to the relay,
+// which forwards the body to the device without being able to read it
+function buildRelayWebPushToken(deviceToken: string, wakeUrl: string) {
+  const { keys } = JSON.parse(deviceToken) as Pick<PushSubscriptionJSON, 'keys'>;
+  return JSON.stringify({ endpoint: wakeUrl, keys });
 }
 
 async function registerSimplePushWakeUrl(deviceToken: string) {

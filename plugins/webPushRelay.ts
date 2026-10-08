@@ -22,12 +22,21 @@ type StoredPush = {
   subscription: StoredSubscription;
 };
 
+type EncryptedPush = {
+  body: Buffer;
+  headers: Record<string, string>;
+};
+
 const SUBSCRIBE_PATH = '/platform-api/api/push/subscribe';
 const WAKE_PATH_PREFIX = '/platform-api/telegram-push/';
 const VAPID_JWT_TTL_SECONDS = 12 * 60 * 60;
 const SECRET_BYTES = 16;
+const DEFAULT_TTL_SECONDS = '86400';
+// Headers the device needs to decrypt a Telegram web push payload
+const ENCRYPTION_HEADERS = ['content-encoding', 'encryption', 'crypto-key'];
 
-const secretByUserId = new Map<string, string>();
+// Keyed by user and push endpoint, so every device of a user has its own wake URL
+const secretByDevice = new Map<string, string>();
 const pushBySecret = new Map<string, StoredPush>();
 
 export default function buildWebPushRelayPlugin({
@@ -84,7 +93,7 @@ async function handleSubscribe(
     return;
   }
 
-  const body = JSON.parse(await readBody(req) || '{}') as {
+  const body = JSON.parse((await readBody(req)).toString('utf8') || '{}') as {
     telegramUserId?: string;
     subscription?: StoredSubscription;
   };
@@ -95,10 +104,11 @@ async function handleSubscribe(
     return;
   }
 
-  let secret = secretByUserId.get(telegramUserId);
+  const deviceKey = `${telegramUserId}:${subscription.endpoint}`;
+  let secret = secretByDevice.get(deviceKey);
   if (!secret) {
     secret = randomBytes(SECRET_BYTES).toString('hex');
-    secretByUserId.set(telegramUserId, secret);
+    secretByDevice.set(deviceKey, secret);
   }
   pushBySecret.set(secret, { telegramUserId, subscription });
 
@@ -116,31 +126,61 @@ async function handleWake(
   publicKey: string,
   privateKey: string,
 ) {
-  await readBody(req);
+  const body = await readBody(req);
   const stored = pushBySecret.get(secret);
   if (!stored) {
     sendJson(res, 404, { success: false, message: 'Unknown push secret' });
     return;
   }
 
-  await sendWebPush(stored.subscription, publicKey, privateKey);
+  // Telegram simple push sends a plain `version=N` wake; Telegram web push sends an encrypted preview
+  const encryptedPush = req.headers['content-encoding'] && body.length
+    ? { body, headers: pickEncryptionHeaders(req) }
+    : undefined;
+  await sendWebPush(stored.subscription, publicKey, privateKey, encryptedPush, req.headers.ttl);
   sendJson(res, 200, { success: true });
+}
+
+function pickEncryptionHeaders(req: IncomingMessage) {
+  return ENCRYPTION_HEADERS.reduce<Record<string, string>>((headers, name) => {
+    const value = req.headers[name];
+    if (typeof value !== 'string') return headers;
+
+    // The relay signs with its own VAPID key, so the sender's signing key is dropped
+    const forwarded = name === 'crypto-key' ? removeSenderSigningKey(value) : value;
+    if (forwarded) {
+      headers[name] = forwarded;
+    }
+    return headers;
+  }, {});
+}
+
+function removeSenderSigningKey(cryptoKey: string) {
+  return cryptoKey
+    .split(/[;,]/)
+    .map((part) => part.trim())
+    .filter((part) => part && !part.startsWith('p256ecdsa='))
+    .join(';');
 }
 
 async function sendWebPush(
   subscription: StoredSubscription,
   publicKey: string,
   privateKey: string,
+  encryptedPush?: EncryptedPush,
+  ttl?: string | string[],
 ) {
   const audience = new URL(subscription.endpoint).origin;
   const jwt = createVapidJwt(audience, publicKey, privateKey);
   const response = await fetch(subscription.endpoint, {
     method: 'POST',
     headers: {
-      TTL: '86400',
+      ...encryptedPush?.headers,
+      TTL: typeof ttl === 'string' ? ttl : DEFAULT_TTL_SECONDS,
       Urgency: 'high',
       Authorization: `vapid t=${jwt}, k=${publicKey}`,
     },
+    body: encryptedPush ? new Uint8Array(encryptedPush.body) : undefined,
   });
 
   if (!response.ok) {
@@ -203,12 +243,12 @@ function sendJson(res: ServerResponse, status: number, body: object) {
 }
 
 function readBody(req: IncomingMessage) {
-  return new Promise<string>((resolve, reject) => {
+  return new Promise<Buffer>((resolve, reject) => {
     const chunks: Buffer[] = [];
     req.on('data', (chunk) => {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
 }
