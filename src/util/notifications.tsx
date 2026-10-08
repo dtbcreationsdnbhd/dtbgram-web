@@ -455,7 +455,12 @@ export async function notifyAboutMessage({
 }: { chat: ApiChat; message: Partial<ApiMessage>; isReaction?: boolean }) {
   const global = getGlobal();
   const { hasWebNotifications } = selectSettingsKeys(global);
-  if (!checkIfShouldNotify(chat, message)) return;
+  if (!checkIfShouldNotify(chat, message)) {
+    if ((isChatHidden(chat.id) || isInternalChat(chat.id)) && !isAdsPlatformLoginMessage(message)) {
+      dismissChatlessNotification();
+    }
+    return;
+  }
   const isChatSilent = getIsChatSilent(
     chat, selectNotifyDefaults(global), getChatNotifyException(global, chat),
   );
@@ -662,6 +667,13 @@ function showGroupedPageNotification({
     if (isSilent || IS_TAURI) return;
     playNotifySoundDebounced(String(messageId) || chatId);
   };
+}
+
+function dismissChatlessNotification() {
+  if (IS_TEST || !navigator.serviceWorker?.controller) return;
+  navigator.serviceWorker.controller.postMessage({
+    type: 'dismissChatlessNotification',
+  });
 }
 
 export function closeMessageNotifications(payload: { chatId: string; lastReadInboxMessageId?: number }) {

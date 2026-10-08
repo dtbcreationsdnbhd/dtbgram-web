@@ -62,6 +62,8 @@ const MAX_ROW_LENGTH = 60;
 const SECONDS_TO_MS = 1000;
 const UNIX_MS_THRESHOLD = 1e12;
 const ROW_WHITESPACE_RE = /\s+/g;
+const HIDDEN_SERVICE_LOC_KEYS = new Set(['AUTH_UNKNOWN', 'AUTH_REGION', 'DC_UPDATE']);
+const EMPTY_WAKE_WAIT_MS = 3000;
 
 type InboxEntry = {
   chatId?: string;
@@ -83,6 +85,8 @@ const inboxByChatKey = new Map<string, InboxEntry>();
 const shownNotifications = new Set();
 const clickBuffer: Record<string, NotificationData> = {};
 let restorePromise: Promise<void> | undefined;
+let lastPreviewPushAt = 0;
+let lastEmptyWakeShownAt = 0;
 
 function getPushData(e: PushEvent | Notification): PushData | undefined {
   if (!('data' in e) || !e.data) {
@@ -227,6 +231,10 @@ function restoreInbox() {
 
 function rememberInboxEntry(notification: NotificationData) {
   const key = getInboxKey(notification.chatId);
+  // A real sender replaces the closed-app "New message" row
+  if (notification.chatId) {
+    inboxByChatKey.delete(getInboxKey(undefined));
+  }
   const previous = inboxByChatKey.get(key);
   if (previous && notification.messageId && previous.messageId === notification.messageId) {
     return false;
@@ -357,6 +365,44 @@ async function closeNotifications({
   await publishInbox(false);
 }
 
+async function checkIfAppIsVisible() {
+  const clients = await getClients();
+  return clients.some((client) => client.visibilityState === 'visible');
+}
+
+async function showPreviewWhenAppIsHidden(notification: NotificationData) {
+  // A visible window decides on its own whether the message needs an alert
+  if (await checkIfAppIsVisible()) return;
+  await showNotification(notification);
+}
+
+async function showWakeWhenAppIsClosed(notification: NotificationData) {
+  if (await checkIfAppIsVisible()) return;
+
+  // Telegram sends one message as both an empty wake and a preview push, in either order
+  const receivedAt = Date.now();
+  await waitFor(EMPTY_WAKE_WAIT_MS);
+  if (lastPreviewPushAt >= receivedAt - EMPTY_WAKE_WAIT_MS) return;
+  if (Date.now() - lastEmptyWakeShownAt < EMPTY_WAKE_WAIT_MS) return;
+
+  lastEmptyWakeShownAt = Date.now();
+  await showNotification(notification);
+}
+
+function waitFor(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function dismissChatlessNotification() {
+  await restoreInbox();
+  const key = getInboxKey(undefined);
+  if (!inboxByChatKey.has(key)) return;
+  inboxByChatKey.delete(key);
+  await publishInbox(false);
+}
+
 export function handlePush(e: PushEvent) {
   if (DEBUG) {
     // eslint-disable-next-line no-console
@@ -374,8 +420,19 @@ export function handlePush(e: PushEvent) {
 
   const notification = getNotificationData(data);
 
-  // An empty wake has no sender and is not shown
-  if (!notification.chatId) return;
+  // Login and data-center pushes come from the hidden service account
+  if (HIDDEN_SERVICE_LOC_KEYS.has(data.loc_key)) {
+    lastPreviewPushAt = Date.now();
+    return;
+  }
+
+  // A push without a sender carries no message preview
+  if (!notification.chatId) {
+    e.waitUntil(showWakeWhenAppIsClosed(notification));
+    return;
+  }
+
+  lastPreviewPushAt = Date.now();
 
   if (
     (isChatHidden(notification.chatId) || isInternalChat(notification.chatId))
@@ -388,7 +445,7 @@ export function handlePush(e: PushEvent) {
     return;
   }
 
-  e.waitUntil(showNotification(notification));
+  e.waitUntil(showPreviewWhenAppIsHidden(notification));
 }
 
 async function focusChatMessage(client: WindowClient, data: FocusMessageData) {
@@ -470,5 +527,9 @@ export function handleClientMessage(e: ExtendableMessageEvent) {
 
   if (e.data.type === 'closeMessageNotifications') {
     e.waitUntil(closeNotifications(e.data.payload));
+  }
+
+  if (e.data.type === 'dismissChatlessNotification') {
+    e.waitUntil(dismissChatlessNotification());
   }
 }
