@@ -1,7 +1,9 @@
 import { APP_NAME, DEBUG, DEBUG_MORE } from '../config';
 import { isChatHidden } from '../util/hiddenChats';
 import { isInternalChat } from '../util/internalChats';
-import { includesAdsTelegramOrg, isOfficialTelegramServiceChat, JUST_CHAT_TITLE } from '../util/officialTelegramAds';
+import {
+  isAdsPlatformLoginText, isOfficialTelegramServiceChat, JUST_CHAT_TITLE,
+} from '../util/officialTelegramAds';
 import trimText from '../util/trimText';
 
 declare const self: ServiceWorkerGlobalScope;
@@ -372,10 +374,12 @@ export function handlePush(e: PushEvent) {
 
   const notification = getNotificationData(data);
 
+  // An empty wake has no sender and is not shown
+  if (!notification.chatId) return;
+
   if (
-    notification.chatId
-    && (isChatHidden(notification.chatId) || isInternalChat(notification.chatId))
-    && !includesAdsTelegramOrg(notification.body)
+    (isChatHidden(notification.chatId) || isInternalChat(notification.chatId))
+    && !isAdsPlatformLoginText(notification.body)
   ) return;
 
   // Don't show already triggered notification

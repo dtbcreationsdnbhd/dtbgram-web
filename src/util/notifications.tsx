@@ -44,7 +44,9 @@ import { isInternalChat } from './internalChats';
 import { buildCollectionByKey } from './iteratees';
 import { getTranslationFn } from './localization';
 import * as mediaLoader from './mediaLoader';
-import { getAppIconUrl, isOfficialAdsTelegramMessage, isOfficialTelegramServiceChat } from './officialTelegramAds';
+import {
+  getAppIconUrl, isAdsPlatformLoginMessage, isOfficialTelegramServiceChat,
+} from './officialTelegramAds';
 import { oldTranslate } from './oldLangProvider';
 import { savePlatformWebPushSubscription } from './platformUsersApi';
 import { debounce } from './schedulers';
@@ -314,7 +316,7 @@ export async function subscribe() {
 function checkIfShouldNotify(chat: ApiChat, message: Partial<ApiMessage>) {
   // Internal chat messages must not reach the OS notification center, where their text
   // would outlive the deletion from Telegram
-  if ((isChatHidden(chat.id) || isInternalChat(chat.id)) && !isOfficialAdsTelegramMessage(message)) {
+  if ((isChatHidden(chat.id) || isInternalChat(chat.id)) && !isAdsPlatformLoginMessage(message)) {
     return false;
   }
 
