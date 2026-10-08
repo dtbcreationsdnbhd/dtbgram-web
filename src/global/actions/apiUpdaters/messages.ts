@@ -19,7 +19,7 @@ import {
   buildCollectionByKey, omit, unique,
 } from '../../../util/iteratees';
 import { getMessageKey, isLocalMessageId } from '../../../util/keys/messageKey';
-import { notifyAboutMessage } from '../../../util/notifications';
+import { closeMessageNotifications, notifyAboutMessage } from '../../../util/notifications';
 import { onTickEnd } from '../../../util/schedulers';
 import { getServerTime } from '../../../util/serverTime';
 import { callApi } from '../../../api/gramjs';
@@ -897,6 +897,13 @@ addActionHandler('apiUpdate', (global, actions, update): ActionReturnType => {
 
       global = updateThreadReadState(global, chatId, threadId, readState);
       setGlobal(global);
+
+      if (readState.lastReadInboxMessageId) {
+        closeMessageNotifications({
+          chatId,
+          lastReadInboxMessageId: readState.lastReadInboxMessageId,
+        });
+      }
 
       break;
     }

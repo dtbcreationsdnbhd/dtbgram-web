@@ -49,6 +49,7 @@ import { oldTranslate } from './oldLangProvider';
 import { savePlatformWebPushSubscription } from './platformUsersApi';
 import { debounce } from './schedulers';
 import { getServerTime } from './serverTime';
+import trimText from './trimText';
 
 import MessageSummary from '../components/common/MessageSummary';
 
@@ -502,47 +503,178 @@ export async function notifyAboutMessage({
           shouldReplaceHistory: true,
           isSilent: isSilent || message.isSilent,
           reaction: activeReaction?.reaction,
+          sentAt: message.date ? message.date * SECONDS_TO_MS : undefined,
         },
       });
     }
   } else {
-    const dispatch = getActions();
-    const options: NotificationOptions = {
+    showGroupedPageNotification({
+      chatId: chat.id,
+      title,
       body,
       icon,
-      badge: icon,
-      tag: String(message.id),
-    };
-
-    if ('vibrate' in navigator) {
-      // @ts-ignore
-      options.vibrate = [200, 100, 200];
-    }
-
-    const notification = new Notification(title, options);
-
-    notification.onclick = () => {
-      notification.close();
-      dispatch.focusMessage({
-        chatId: chat.id,
-        messageId: message.id!,
-        shouldReplaceHistory: true,
-      });
-      if (window.focus) {
-        window.focus();
-      }
-    };
-
-    // Play sound when notification is displayed
-    notification.onshow = () => {
-      // TODO Update when reaction badges are implemented
-      if (isSilent || isReaction || message.isSilent || IS_TAURI) return;
-      playNotifySoundDebounced(String(message.id) || chat.id);
-    };
+      messageId: message.id,
+      isSilent: isSilent || message.isSilent || isReaction,
+      sentAt: message.date ? message.date * SECONDS_TO_MS : undefined,
+    });
   }
 }
 
+const PAGE_NOTIFICATION_TAG = 'justchat';
+const MAX_PAGE_INBOX_CHATS = 8;
+const MAX_PAGE_LINES_PER_CHAT = 5;
+const MAX_ROW_LENGTH = 60;
+const SECONDS_TO_MS = 1000;
+const ROW_WHITESPACE_RE = /\s+/g;
+
+type PageInboxEntry = {
+  chatId: string;
+  title: string;
+  bodies: string[];
+  messageId: number;
+  icon?: string;
+  sentAt?: number;
+};
+
+type PageNotificationOptions = NotificationOptions & {
+  timestamp?: number;
+};
+
+const pageInboxByChatId = new Map<string, PageInboxEntry>();
+let activePageNotification: Notification | undefined;
+
+function latestSentAt(current?: number, next?: number) {
+  if (current === undefined) return next;
+  if (next === undefined) return current;
+  return Math.max(current, next);
+}
+
+function clampNotificationTimestamp(sentAt?: number) {
+  if (!sentAt) return undefined;
+  return Math.min(sentAt, Date.now());
+}
+
+function formatRow(text?: string) {
+  const flattened = (text || '').replace(ROW_WHITESPACE_RE, ' ').trim();
+  return trimText(flattened, MAX_ROW_LENGTH) || '';
+}
+
+function showGroupedPageNotification({
+  chatId,
+  title,
+  body,
+  icon,
+  messageId,
+  isSilent,
+  sentAt,
+}: {
+  chatId: string;
+  title: string;
+  body: string;
+  icon?: string;
+  messageId: number;
+  isSilent?: boolean;
+  sentAt?: number;
+}) {
+  const previous = pageInboxByChatId.get(chatId);
+  if (previous?.messageId === messageId) return;
+
+  const bodies = [...(previous?.bodies || []), body].slice(-MAX_PAGE_LINES_PER_CHAT);
+  pageInboxByChatId.delete(chatId);
+  pageInboxByChatId.set(chatId, {
+    chatId,
+    title,
+    bodies,
+    messageId,
+    icon: icon || previous?.icon,
+    sentAt: latestSentAt(previous?.sentAt, sentAt),
+  });
+
+  while (pageInboxByChatId.size > MAX_PAGE_INBOX_CHATS) {
+    const oldestKey = pageInboxByChatId.keys().next().value;
+    if (!oldestKey) break;
+    pageInboxByChatId.delete(oldestKey);
+  }
+
+  const entries = Array.from(pageInboxByChatId.values()).reverse();
+  const onlyEntry = entries.length === 1 ? entries[0] : undefined;
+  const notificationTitle = onlyEntry ? onlyEntry.title : APP_NAME;
+  const notificationBody = onlyEntry
+    ? onlyEntry.bodies.map((line) => formatRow(line)).join('\n')
+    : entries.map((entry) => formatRow(`${entry.title}: ${entry.bodies[entry.bodies.length - 1]}`)).join('\n');
+  const newestSentAt = entries.reduce<number | undefined>(
+    (latest, entry) => latestSentAt(latest, entry.sentAt),
+    undefined,
+  );
+  const notificationSentAt = !isSilent && !sentAt
+    ? Date.now()
+    : clampNotificationTimestamp(latestSentAt(newestSentAt, sentAt));
+  const options: PageNotificationOptions = {
+    body: notificationBody,
+    icon: onlyEntry?.icon || icon,
+    badge: onlyEntry?.icon || icon,
+    tag: PAGE_NOTIFICATION_TAG,
+    silent: Boolean(isSilent),
+  };
+
+  if (notificationSentAt) {
+    options.timestamp = notificationSentAt;
+  }
+
+  if (!isSilent && 'vibrate' in navigator) {
+    // @ts-ignore
+    options.vibrate = [200, 100, 200];
+    // @ts-ignore
+    options.renotify = true;
+  }
+
+  activePageNotification?.close();
+  const dispatch = getActions();
+  let notification: Notification;
+  try {
+    notification = new Notification(notificationTitle, options);
+  } catch (err) {
+    const fallbackOptions: NotificationOptions = { ...options };
+    Reflect.deleteProperty(fallbackOptions, 'timestamp');
+    Reflect.deleteProperty(fallbackOptions, 'renotify');
+    notification = new Notification(notificationTitle, fallbackOptions);
+  }
+  activePageNotification = notification;
+  notification.onclick = () => {
+    notification.close();
+    activePageNotification = undefined;
+    pageInboxByChatId.clear();
+    if (onlyEntry) {
+      dispatch.focusMessage({
+        chatId: onlyEntry.chatId,
+        messageId: onlyEntry.messageId,
+        shouldReplaceHistory: true,
+      });
+    }
+    if (window.focus) {
+      window.focus();
+    }
+  };
+
+  notification.onshow = () => {
+    if (isSilent || IS_TAURI) return;
+    playNotifySoundDebounced(String(messageId) || chatId);
+  };
+}
+
 export function closeMessageNotifications(payload: { chatId: string; lastReadInboxMessageId?: number }) {
+  if (!payload.lastReadInboxMessageId) return;
+
+  const entry = pageInboxByChatId.get(payload.chatId);
+  if (entry && entry.messageId > payload.lastReadInboxMessageId) return;
+
+  pageInboxByChatId.delete(payload.chatId);
+
+  if (!pageInboxByChatId.size) {
+    activePageNotification?.close();
+    activePageNotification = undefined;
+  }
+
   if (IS_TEST || !navigator.serviceWorker?.controller) return;
   navigator.serviceWorker.controller.postMessage({
     type: 'closeMessageNotifications',
@@ -595,7 +727,7 @@ function buildSubscribeOptions(applicationServerKey?: BufferSource | string): Pu
 
 function isPushServiceAbort(error: unknown): boolean {
   return error instanceof DOMException
-    && [DOMException.ABORT_ERR, DOMException.NOT_SUPPORTED_ERR].includes(error.code);
+    && (error.code === DOMException.ABORT_ERR || error.code === DOMException.NOT_SUPPORTED_ERR);
 }
 
 function getWebPushApplicationServerKey() {
