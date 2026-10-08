@@ -8,7 +8,7 @@ import type { GlobalState } from '../global/types';
 import { ApiMediaFormat } from '../api/types';
 
 import {
-  APP_NAME, DEBUG, IS_TEST, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH, WEB_PUSH_PUBLIC_KEY,
+  APP_NAME, DEBUG, IS_TEST, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH, TELEGRAM_TOKEN_TYPE_WEB_PUSH, WEB_PUSH_PUBLIC_KEY,
 } from '../config';
 import {
   getChatAvatarHash,
@@ -185,10 +185,13 @@ export async function requestPermission() {
 
 async function unsubscribeFromPush(subscription: PushSubscription | null) {
   const { deleteDeviceToken } = getActions();
-  const wakeUrl = getGlobal().push?.wakeUrl;
+  const { wakeUrl, deviceToken } = getGlobal().push || {};
   if (wakeUrl) {
     try {
       await callApi('unregisterDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
+      if (deviceToken) {
+        await callApi('unregisterDevice', buildRelayWebPushToken(deviceToken, wakeUrl), TELEGRAM_TOKEN_TYPE_WEB_PUSH);
+      }
     } catch (error) {
       if (DEBUG) {
         // eslint-disable-next-line no-console
@@ -261,7 +264,7 @@ export async function subscribe() {
   const serviceWorkerRegistration = await navigator.serviceWorker.ready;
   let subscription = await serviceWorkerRegistration.pushManager.getSubscription();
   if (!checkIfShouldResubscribe(subscription)) {
-    await ensureSimplePushRegistration(subscription);
+    await ensureRelayPushRegistration(subscription);
     return;
   }
   await unsubscribeFromPush(subscription);
@@ -279,6 +282,7 @@ export async function subscribe() {
     }
     if (wakeUrl) {
       await callApi('registerDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
+      await registerRelayWebPush(deviceToken, wakeUrl);
     }
     setDeviceToken({ token: deviceToken, wakeUrl });
     hasPushNotifications = true;
@@ -754,15 +758,38 @@ function getWebPushApplicationServerKey() {
   return bytes;
 }
 
-async function ensureSimplePushRegistration(subscription: PushSubscription | null) {
-  if (!subscription || getGlobal().push?.wakeUrl) return;
+async function ensureRelayPushRegistration(subscription: PushSubscription | null) {
+  if (!subscription) return;
 
   const deviceToken = getDeviceToken(subscription);
+  const savedWakeUrl = getGlobal().push?.wakeUrl;
+  if (savedWakeUrl) {
+    await registerRelayWebPush(deviceToken, savedWakeUrl);
+    return;
+  }
+
   const wakeUrl = await registerSimplePushWakeUrl(deviceToken);
   if (!wakeUrl) return;
 
   await callApi('registerDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
+  await registerRelayWebPush(deviceToken, wakeUrl);
   getActions().setDeviceToken({ token: deviceToken, wakeUrl });
+}
+
+async function registerRelayWebPush(deviceToken: string, wakeUrl: string) {
+  const relayToken = buildRelayWebPushToken(deviceToken, wakeUrl);
+  const result = await callApi('registerDevice', relayToken, TELEGRAM_TOKEN_TYPE_WEB_PUSH);
+  if (DEBUG) {
+    // eslint-disable-next-line no-console
+    console.log('[PUSH] Relay web push registered: ', Boolean(result));
+  }
+}
+
+// Telegram encrypts the message preview with this device's keys and posts it to the relay,
+// which forwards the body to the device without being able to read it
+function buildRelayWebPushToken(deviceToken: string, wakeUrl: string) {
+  const { keys } = JSON.parse(deviceToken) as Pick<PushSubscriptionJSON, 'keys'>;
+  return JSON.stringify({ endpoint: wakeUrl, keys });
 }
 
 async function registerSimplePushWakeUrl(deviceToken: string) {
