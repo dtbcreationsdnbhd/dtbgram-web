@@ -61,7 +61,7 @@ import {
 import { buildInputPasskeyCredential } from '../gramjsBuilders/passkeys';
 import { addPhotoToLocalDb } from '../helpers/localDb';
 import localDb from '../localDb';
-import { getClient, invokeRequest, uploadFile } from './client';
+import { invokeRequest, uploadFile } from './client';
 
 const BETA_LANG_CODES = ['ar', 'fa', 'id', 'ko', 'uz', 'en'];
 
@@ -574,11 +574,11 @@ export async function fetchPrivacySettings(privacyKey: ApiPrivacyKey) {
 }
 
 export function registerDevice(token: string, tokenType = TELEGRAM_TOKEN_TYPE_WEB_PUSH) {
-  const client = getClient();
-  const secret = client.session.getAuthKey().getKey()!;
   return invokeRequest(new GramJs.account.RegisterDevice({
     tokenType,
-    secret,
+    // Web Push already encrypts the payload to the device keys, and the service worker has no access
+    // to the auth key, so Telegram's own `secret` encryption layer is left off
+    secret: new Uint8Array(0),
     appSandbox: false,
     otherUids: [],
     token,

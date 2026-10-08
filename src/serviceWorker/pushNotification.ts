@@ -98,7 +98,9 @@ function getPushData(e: PushEvent | Notification): PushData | undefined {
   }
 
   try {
-    return e.data.json();
+    const data = e.data.json();
+    // Payloads encrypted with a Telegram `secret` arrive as `{ p }` and cannot be read here
+    return data?.custom ? data : buildGenericPushData();
   } catch (error) {
     if (DEBUG) {
       // eslint-disable-next-line no-console
