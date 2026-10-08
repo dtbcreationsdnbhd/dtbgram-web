@@ -602,10 +602,13 @@ function showGroupedPageNotification({
   const notificationBody = onlyEntry
     ? onlyEntry.bodies.map((line) => formatRow(line)).join('\n')
     : entries.map((entry) => formatRow(`${entry.title}: ${entry.bodies[entry.bodies.length - 1]}`)).join('\n');
-  const notificationSentAt = clampNotificationTimestamp(entries.reduce<number | undefined>(
+  const newestSentAt = entries.reduce<number | undefined>(
     (latest, entry) => latestSentAt(latest, entry.sentAt),
     undefined,
-  ));
+  );
+  const notificationSentAt = !isSilent && !sentAt
+    ? Date.now()
+    : clampNotificationTimestamp(latestSentAt(newestSentAt, sentAt));
   const options: PageNotificationOptions = {
     body: notificationBody,
     icon: onlyEntry?.icon || icon,

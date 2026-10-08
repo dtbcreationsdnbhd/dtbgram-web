@@ -253,7 +253,7 @@ function rememberInboxEntry(notification: NotificationData) {
   return true;
 }
 
-function buildGroupedNotification(shouldAlert: boolean) {
+function buildGroupedNotification(shouldAlert: boolean, incomingSentAt?: number) {
   const entries = Array.from(inboxByChatKey.values()).reverse();
   const onlyEntry = entries.length === 1 ? entries[0] : undefined;
   const title = onlyEntry ? onlyEntry.title : APP_NAME;
@@ -262,10 +262,14 @@ function buildGroupedNotification(shouldAlert: boolean) {
     ? onlyEntry.bodies.map((line) => formatRow(line)).join('\n')
     : entries.map((entry) => formatRow(`${entry.title}: ${entry.bodies[entry.bodies.length - 1]}`)).join('\n');
   const messageCount = entries.reduce((sum, entry) => sum + entry.bodies.length, 0);
-  const sentAt = clampNotificationTimestamp(entries.reduce<number | undefined>(
+  const newestSentAt = entries.reduce<number | undefined>(
     (latest, entry) => latestSentAt(latest, entry.sentAt),
     undefined,
-  ));
+  );
+  // A dateless message just arrived, so the card clock is the current time
+  const sentAt = shouldAlert && !incomingSentAt
+    ? Date.now()
+    : clampNotificationTimestamp(latestSentAt(newestSentAt, incomingSentAt));
 
   const options: AppNotificationOptions = {
     body,
@@ -298,17 +302,17 @@ function buildGroupedNotification(shouldAlert: boolean) {
   return { title, options };
 }
 
-async function publishInbox(shouldAlert: boolean) {
+async function publishInbox(shouldAlert: boolean, incomingSentAt?: number) {
+  const grouped = inboxByChatKey.size
+    ? buildGroupedNotification(shouldAlert, incomingSentAt)
+    : undefined;
   const notifications = await self.registration.getNotifications();
-  notifications.forEach((notification) => {
-    if (notification.tag !== APP_NOTIFICATION_TAG || !inboxByChatKey.size) {
-      notification.close();
-    }
-  });
+  // The previous card is closed first so this alert gets a new clock
+  notifications.forEach((notification) => notification.close());
 
-  if (!inboxByChatKey.size) return;
+  if (!grouped) return;
 
-  const { title, options } = buildGroupedNotification(shouldAlert);
+  const { title, options } = grouped;
   try {
     await self.registration.showNotification(title, options);
   } catch (err) {
@@ -331,7 +335,7 @@ async function showNotification(notification: NotificationData) {
     shouldAlert
       ? playNotificationSound(String(notification.messageId) || notification.chatId || '')
       : undefined,
-    publishInbox(shouldAlert),
+    publishInbox(shouldAlert, notification.sentAt),
   ]);
 }
 
