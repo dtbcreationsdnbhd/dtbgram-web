@@ -24,6 +24,9 @@ interface ImportMetaEnv {
   readonly TG_PLATFORM_API_ORIGIN?: string;
   readonly TG_PLATFORM_API_KEY_WEBSITE?: string;
   readonly TG_FCM_SENDER_ID?: string;
+  readonly TG_FCM_PROJECT_ID?: string;
+  readonly TG_FCM_API_KEY?: string;
+  readonly TG_FCM_APP_ID?: string;
   readonly TG_WEB_PUSH_PUBLIC_KEY?: string;
   readonly TG_ROSTER_SESSION_USER_ID?: string;
   readonly TG_APP_LOCK_PASSWORD?: string;

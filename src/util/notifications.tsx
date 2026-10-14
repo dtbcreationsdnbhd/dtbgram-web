@@ -8,7 +8,8 @@ import type { GlobalState } from '../global/types';
 import { ApiMediaFormat } from '../api/types';
 
 import {
-  APP_NAME, DEBUG, IS_TEST, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH, TELEGRAM_TOKEN_TYPE_WEB_PUSH, WEB_PUSH_PUBLIC_KEY,
+  APP_NAME, DEBUG, IS_TEST, TELEGRAM_TOKEN_TYPE_FCM, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH, TELEGRAM_TOKEN_TYPE_WEB_PUSH,
+  WEB_PUSH_PUBLIC_KEY,
 } from '../config';
 import {
   getChatAvatarHash,
@@ -39,6 +40,7 @@ import { callApi } from '../api/gramjs';
 import { IS_TAURI } from './browser/globalEnvironment';
 import { IS_SERVICE_WORKER_SUPPORTED, IS_TOUCH_ENV } from './browser/windowEnvironment';
 import jsxToHtml from './element/jsxToHtml';
+import { IS_FCM_PUSH_ENABLED, requestFcmToken } from './fcmPush';
 import { isChatHidden } from './hiddenChats';
 import { isInternalChat } from './internalChats';
 import { buildCollectionByKey } from './iteratees';
@@ -48,9 +50,9 @@ import {
   getAppIconUrl, isAdsPlatformLoginMessage, isOfficialTelegramServiceChat,
 } from './officialTelegramAds';
 import { oldTranslate } from './oldLangProvider';
-import { savePlatformWebPushSubscription } from './platformUsersApi';
 import { debounce } from './schedulers';
 import { getServerTime } from './serverTime';
+import { getOrCreatePushSecret } from './telegramPushSecret';
 import trimText from './trimText';
 
 import MessageSummary from '../components/common/MessageSummary';
@@ -185,9 +187,12 @@ export async function requestPermission() {
 
 async function unsubscribeFromPush(subscription: PushSubscription | null) {
   const { deleteDeviceToken } = getActions();
-  const { wakeUrl, deviceToken } = getGlobal().push || {};
+  const { wakeUrl, deviceToken, fcmToken } = getGlobal().push || {};
   if (wakeUrl) {
     await unregisterTelegramPush(wakeUrl, deviceToken);
+  }
+  if (fcmToken) {
+    await unregisterFcmPush(fcmToken);
   }
   if (subscription) {
     try {
@@ -254,7 +259,7 @@ export async function subscribe() {
   const serviceWorkerRegistration = await navigator.serviceWorker.ready;
   let subscription = await serviceWorkerRegistration.pushManager.getSubscription();
   if (!checkIfShouldResubscribe(subscription)) {
-    await ensureRelayPushRegistration(subscription);
+    await ensurePushRegistration(subscription);
     return;
   }
   await unsubscribeFromPush(subscription);
@@ -265,17 +270,9 @@ export async function subscribe() {
       // eslint-disable-next-line no-console
       console.log('[PUSH] Received push subscription: ', deviceToken);
     }
-    const wakeUrl = await registerSimplePushWakeUrl(deviceToken);
-    if (DEBUG) {
-      // eslint-disable-next-line no-console
-      console.log('[PUSH] Wake URL: ', wakeUrl);
-    }
-    if (wakeUrl) {
-      await callApi('registerDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
-      await registerRelayWebPush(deviceToken, wakeUrl);
-    }
-    setDeviceToken({ token: deviceToken, wakeUrl });
-    hasPushNotifications = true;
+    const fcmToken = await registerFcmPush(deviceToken);
+    setDeviceToken({ token: deviceToken, fcmToken });
+    hasPushNotifications = Boolean(fcmToken);
     hasWebNotifications = true;
   } catch (error: any) {
     if (Notification.permission === 'denied') {
@@ -748,22 +745,46 @@ function getWebPushApplicationServerKey() {
   return bytes;
 }
 
-async function ensureRelayPushRegistration(subscription: PushSubscription | null) {
+async function ensurePushRegistration(subscription: PushSubscription | null) {
   if (!subscription) return;
 
   const deviceToken = getDeviceToken(subscription);
-  const { wakeUrl: savedWakeUrl, deviceToken: savedDeviceToken } = getGlobal().push || {};
-  // The platform issues one wake URL per device, so a different URL replaces the saved registration
-  const wakeUrl = await registerSimplePushWakeUrl(deviceToken) || savedWakeUrl;
-  if (!wakeUrl) return;
-
-  if (savedWakeUrl && savedWakeUrl !== wakeUrl) {
+  const {
+    wakeUrl: savedWakeUrl, deviceToken: savedDeviceToken, fcmToken: savedFcmToken,
+  } = getGlobal().push || {};
+  if (savedWakeUrl) {
     await unregisterTelegramPush(savedWakeUrl, savedDeviceToken);
   }
-  await callApi('registerDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
-  await registerRelayWebPush(deviceToken, wakeUrl);
-  if (wakeUrl !== savedWakeUrl || deviceToken !== savedDeviceToken) {
-    getActions().setDeviceToken({ token: deviceToken, wakeUrl });
+
+  const fcmToken = await registerFcmPush(deviceToken, savedFcmToken);
+  if (savedWakeUrl || deviceToken !== savedDeviceToken || fcmToken !== savedFcmToken) {
+    getActions().setDeviceToken({ token: deviceToken, fcmToken });
+  }
+}
+
+async function registerFcmPush(deviceToken: string, savedFcmToken?: string) {
+  if (!IS_FCM_PUSH_ENABLED) return undefined;
+
+  const fcmToken = savedFcmToken || await requestFcmToken(deviceToken);
+  if (!fcmToken) return undefined;
+
+  const secret = await getOrCreatePushSecret().catch(() => undefined);
+  const result = await callApi('registerDevice', fcmToken, TELEGRAM_TOKEN_TYPE_FCM, secret);
+  if (DEBUG) {
+    // eslint-disable-next-line no-console
+    console.log('[PUSH] FCM push registered: ', Boolean(result));
+  }
+  return fcmToken;
+}
+
+async function unregisterFcmPush(fcmToken: string) {
+  try {
+    await callApi('unregisterDevice', fcmToken, TELEGRAM_TOKEN_TYPE_FCM);
+  } catch (error) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.log('[PUSH] Unable to unregister FCM device.', error);
+    }
   }
 }
 
@@ -781,44 +802,9 @@ async function unregisterTelegramPush(wakeUrl: string, deviceToken?: string) {
   }
 }
 
-async function registerRelayWebPush(deviceToken: string, wakeUrl: string) {
-  const relayToken = buildRelayWebPushToken(deviceToken, wakeUrl);
-  const result = await callApi('registerDevice', relayToken, TELEGRAM_TOKEN_TYPE_WEB_PUSH);
-  if (DEBUG) {
-    // eslint-disable-next-line no-console
-    console.log('[PUSH] Relay web push registered: ', Boolean(result));
-  }
-}
-
-// Telegram encrypts the message preview with this device's keys and posts it to the relay,
-// which forwards the body to the device without being able to read it
 function buildRelayWebPushToken(deviceToken: string, wakeUrl: string) {
   const { keys } = JSON.parse(deviceToken) as Pick<PushSubscriptionJSON, 'keys'>;
   return JSON.stringify({ endpoint: wakeUrl, keys });
-}
-
-async function registerSimplePushWakeUrl(deviceToken: string) {
-  const telegramUserId = getGlobal().currentUserId;
-  if (!telegramUserId) return undefined;
-
-  const subscription = JSON.parse(deviceToken) as {
-    endpoint?: string;
-    keys?: { p256dh?: string; auth?: string };
-  };
-  if (!subscription.endpoint || !subscription.keys?.p256dh || !subscription.keys.auth) {
-    return undefined;
-  }
-
-  return savePlatformWebPushSubscription({
-    telegramUserId,
-    subscription: {
-      endpoint: subscription.endpoint,
-      keys: {
-        p256dh: subscription.keys.p256dh,
-        auth: subscription.keys.auth,
-      },
-    },
-  });
 }
 
 function doesSubscriptionMatchVapid(subscription: PushSubscription) {
