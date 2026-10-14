@@ -56,9 +56,13 @@ export const TEST_SESSION = env.TG_TEST_SESSION;
 export const PLATFORM_API_ORIGIN = env.TG_PLATFORM_API_ORIGIN || '';
 export const PLATFORM_API_KEY_WEBSITE = env.TG_PLATFORM_API_KEY_WEBSITE || '';
 export const FCM_SENDER_ID = (env.TG_FCM_SENDER_ID || env.SENDER_ID || '').replace(/\s+/g, '');
+export const FCM_PROJECT_ID = env.TG_FCM_PROJECT_ID || '';
+export const FCM_API_KEY = env.TG_FCM_API_KEY || '';
+export const FCM_APP_ID = env.TG_FCM_APP_ID || '';
 export const WEB_PUSH_PUBLIC_KEY = (
   env.TG_WEB_PUSH_PUBLIC_KEY || env.WEB_PUSH_CERTIFICATES_KEY_PAIR_PUBLIC || ''
 ).replace(/\s+/g, '');
+export const TELEGRAM_TOKEN_TYPE_FCM = 2;
 export const TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH = 4;
 export const TELEGRAM_TOKEN_TYPE_WEB_PUSH = 10;
 export const ROSTER_SESSION_USER_ID = env.TG_ROSTER_SESSION_USER_ID || '';

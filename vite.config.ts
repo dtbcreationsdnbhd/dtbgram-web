@@ -93,6 +93,9 @@ export default defineConfig(({ mode }): UserConfig => {
   const platformApiOrigin = process.env.PLATFORM_API_ORIGIN || env.PLATFORM_API_ORIGIN || '';
   const platformApiKeyWebsite = process.env.PLATFORM_API_KEY_WEBSITE || env.PLATFORM_API_KEY_WEBSITE || '';
   const fcmSenderId = (process.env.SENDER_ID || env.SENDER_ID || '').trim();
+  const fcmProjectId = (process.env.PROJECT_ID || env.PROJECT_ID || '').trim();
+  const fcmApiKey = (process.env.FCM_API_KEY || env.FCM_API_KEY || '').trim();
+  const fcmAppId = (process.env.FCM_APP_ID || env.FCM_APP_ID || '').trim();
   const webPushPublicKey = (
     process.env.WEB_PUSH_CERTIFICATES_KEY_PAIR_PUBLIC
     || env.WEB_PUSH_CERTIFICATES_KEY_PAIR_PUBLIC
@@ -230,6 +233,9 @@ export default defineConfig(({ mode }): UserConfig => {
     TG_PLATFORM_API_ORIGIN: platformApiOrigin,
     TG_PLATFORM_API_KEY_WEBSITE: platformApiKeyWebsite,
     TG_FCM_SENDER_ID: fcmSenderId,
+    TG_FCM_PROJECT_ID: fcmProjectId,
+    TG_FCM_API_KEY: fcmApiKey,
+    TG_FCM_APP_ID: fcmAppId,
     TG_WEB_PUSH_PUBLIC_KEY: webPushPublicKey,
     TG_ROSTER_SESSION_USER_ID: rosterSessionUserId,
     TG_APP_LOCK_PASSWORD: appLockPassword,
