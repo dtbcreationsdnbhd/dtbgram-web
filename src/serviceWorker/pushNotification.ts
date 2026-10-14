@@ -117,7 +117,7 @@ function rawToPushData(raw: unknown) {
     };
   }
   if (raw === undefined) return buildGenericPushData();
-  // Payloads encrypted with a Telegram `secret` arrive as `{ p }` and cannot be read here
+  // A payload that stays encrypted as `{ p }` falls back to the generic text
   return normalizePushPayload(raw) || buildGenericPushData();
 }
 
@@ -157,8 +157,7 @@ function normalizePushPayload(payload: any): PushData | undefined {
 }
 
 function isFcmEnvelope(payload: any) {
-  return typeof payload.data === 'object'
-    && payload.data !== undefined
+  return payload.data instanceof Object
     && !payload.custom
     && !payload.loc_key;
 }

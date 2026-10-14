@@ -9,7 +9,6 @@ import { type Target, viteStaticCopy } from 'vite-plugin-static-copy';
 import { watchAndRun } from 'vite-plugin-watch-and-run';
 
 import buildGitInfoPlugin from './plugins/gitInfo.ts';
-import buildWebPushRelayPlugin from './plugins/webPushRelay.ts';
 import packageJson from './package.json' with { type: 'json' };
 
 const DIR_NAME = dirname(fileURLToPath(import.meta.url));
@@ -101,14 +100,6 @@ export default defineConfig(({ mode }): UserConfig => {
     || env.WEB_PUSH_CERTIFICATES_KEY_PAIR_PUBLIC
     || ''
   ).trim();
-  const webPushPrivateKey = (
-    process.env.WEB_PUSH_CERTIFICATES_KEY_PAIR_PRIVATE
-    || env.WEB_PUSH_CERTIFICATES_KEY_PAIR_PRIVATE
-    || ''
-  ).trim();
-  const pushRelayPublicOrigin = (
-    process.env.PUSH_RELAY_PUBLIC_ORIGIN || env.PUSH_RELAY_PUBLIC_ORIGIN || ''
-  ).trim();
   const rosterSessionUserId = process.env.ROSTER_SESSION_USER_ID || env.ROSTER_SESSION_USER_ID || '';
   const appLockPassword = process.env.APP_LOCK_PASSWORD || env.APP_LOCK_PASSWORD || '';
   const workerReportBundles: OutputBundle[] = [];
@@ -118,14 +109,6 @@ export default defineConfig(({ mode }): UserConfig => {
       head: HEAD,
       isDevelopmentMode,
       rootDir: DIR_NAME,
-    }),
-    // A set PLATFORM_API_ORIGIN means this dev server should proxy subscribe and
-    // wake to that admin. The in-memory relay is only for dev with no admin.
-    isDevelopmentMode && !platformApiOrigin && buildWebPushRelayPlugin({
-      publicKey: webPushPublicKey,
-      privateKey: webPushPrivateKey,
-      apiKey: platformApiKeyWebsite,
-      publicOrigin: pushRelayPublicOrigin,
     }),
     viteStaticCopy({ targets: WATCHED_STATIC_COPY_TARGETS }),
     viteStaticCopy({
