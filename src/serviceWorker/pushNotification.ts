@@ -4,6 +4,7 @@ import { isInternalChat } from '../util/internalChats';
 import {
   isAdsPlatformLoginText, isOfficialTelegramServiceChat, JUST_CHAT_TITLE,
 } from '../util/officialTelegramAds';
+import { decryptTelegramPush, loadPushSecret } from '../util/telegramPushSecret';
 import trimText from '../util/trimText';
 
 declare const self: ServiceWorkerGlobalScope;
@@ -139,8 +140,7 @@ function normalizePushPayload(payload: any): PushData | undefined {
   const description = source.description
     || notification?.body
     || locArgs[locArgs.length - 1];
-  const hasPreview = Boolean(source.custom || source.loc_key || description);
-  if (!hasPreview) return undefined;
+  if (!source.custom && !source.loc_key && !description) return undefined;
 
   return {
     ...source,
@@ -157,10 +157,16 @@ function normalizePushPayload(payload: any): PushData | undefined {
 }
 
 function isFcmEnvelope(payload: any) {
-  return Boolean(payload.data)
-    && typeof payload.data === 'object'
+  return typeof payload.data === 'object'
+    && payload.data !== undefined
     && !payload.custom
     && !payload.loc_key;
+}
+
+function isBadgeOnlyPush(payload: unknown) {
+  if (!payload || typeof payload !== 'object') return false;
+  const fields = isFcmEnvelope(payload) ? (payload as { data: object }).data : payload;
+  return Object.keys(fields).every((key) => key === 'badge');
 }
 
 function unwrapFcmData(data: Record<string, unknown>) {
@@ -410,6 +416,10 @@ async function publishInbox(shouldAlert: boolean, incomingSentAt?: number) {
   try {
     await self.registration.showNotification(title, options);
   } catch (err) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn('[SW] showNotification rejected, retrying without timestamp', err);
+    }
     // A rejected timestamp or `renotify` must not swallow the alert
     const fallbackOptions: NotificationOptions = { ...options };
     Reflect.deleteProperty(fallbackOptions, 'timestamp');
@@ -420,7 +430,12 @@ async function publishInbox(shouldAlert: boolean, incomingSentAt?: number) {
 
 async function showNotification(notification: NotificationData) {
   await restoreInbox();
-  if (!rememberInboxEntry(notification)) return undefined;
+  const hadWakeRow = inboxByChatKey.has(getInboxKey(undefined));
+  if (!rememberInboxEntry(notification)) {
+    // A duplicate preview still replaces the closed-app "New message" row
+    if (hadWakeRow && notification.chatId) await publishInbox(false);
+    return undefined;
+  }
 
   const shouldAlert = !notification.reaction && !notification.isSilent;
 
@@ -494,32 +509,38 @@ export function handlePush(e: PushEvent) {
     console.log('[SW] Push received event', e);
     if (raw !== undefined) {
       // eslint-disable-next-line no-console
-      console.log('[SW] Push received with data', raw);
+      console.log('[SW] Push received with data', JSON.stringify(raw));
     }
   }
 
-  const data = rawToPushData(raw);
+  e.waitUntil(processPush(raw));
+}
+
+async function processPush(raw: unknown) {
+  const payload = await decryptFcmPush(raw);
+  // A badge-only push carries no message; the open app or a preview push shows that message
+  if (isBadgeOnlyPush(payload)) return undefined;
+
+  const data = rawToPushData(payload);
 
   // Do not show muted notifications
-  if (!data || data.mute === Boolean.True) return;
+  if (!data || data.mute === Boolean.True) return undefined;
 
   const notification = getNotificationData(data);
 
   // Login and data-center pushes come from the hidden service account
   if (HIDDEN_SERVICE_LOC_KEYS.has(data.loc_key)) {
     lastPreviewPushAt = Date.now();
-    return;
+    return undefined;
   }
 
   // A push without a sender carries no message preview. FCM can still include the text in `loc_args`.
   if (!notification.chatId) {
     if (notification.body && notification.body !== GENERIC_PUSH_DESCRIPTION) {
       lastPreviewPushAt = Date.now();
-      e.waitUntil(showPreviewWhenAppIsHidden(notification));
-      return;
+      return showPreviewWhenAppIsHidden(notification);
     }
-    e.waitUntil(showWakeWhenAppIsClosed(notification));
-    return;
+    return showWakeWhenAppIsClosed(notification);
   }
 
   lastPreviewPushAt = Date.now();
@@ -527,15 +548,36 @@ export function handlePush(e: PushEvent) {
   if (
     (isChatHidden(notification.chatId) || isInternalChat(notification.chatId))
     && !isAdsPlatformLoginText(notification.body)
-  ) return;
+  ) {
+    return undefined;
+  }
 
   // Don't show already triggered notification
   if (shownNotifications.has(notification.messageId)) {
     shownNotifications.delete(notification.messageId);
-    return;
+    return dismissChatlessNotification();
   }
 
-  e.waitUntil(showPreviewWhenAppIsHidden(notification));
+  return showPreviewWhenAppIsHidden(notification);
+}
+
+// FCM pushes registered with a `secret` carry the Telegram payload encrypted in `data.p`
+async function decryptFcmPush(raw: unknown) {
+  if (!raw || typeof raw !== 'object' || !isFcmEnvelope(raw)) return raw;
+  const encoded = (raw as { data: { p?: unknown } }).data.p;
+  if (typeof encoded !== 'string') return raw;
+
+  try {
+    const secret = await loadPushSecret();
+    const payload = secret ? await decryptTelegramPush(encoded, secret) : undefined;
+    return payload ?? raw;
+  } catch (err) {
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.warn('[SW] Unable to decrypt FCM push', err);
+    }
+    return raw;
+  }
 }
 
 async function focusChatMessage(client: WindowClient, data: FocusMessageData) {

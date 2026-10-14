@@ -52,6 +52,7 @@ import {
 import { oldTranslate } from './oldLangProvider';
 import { debounce } from './schedulers';
 import { getServerTime } from './serverTime';
+import { getOrCreatePushSecret } from './telegramPushSecret';
 import trimText from './trimText';
 
 import MessageSummary from '../components/common/MessageSummary';
@@ -767,7 +768,8 @@ async function registerFcmPush(deviceToken: string, savedFcmToken?: string) {
   const fcmToken = savedFcmToken || await requestFcmToken(deviceToken);
   if (!fcmToken) return undefined;
 
-  const result = await callApi('registerDevice', fcmToken, TELEGRAM_TOKEN_TYPE_FCM);
+  const secret = await getOrCreatePushSecret().catch(() => undefined);
+  const result = await callApi('registerDevice', fcmToken, TELEGRAM_TOKEN_TYPE_FCM, secret);
   if (DEBUG) {
     // eslint-disable-next-line no-console
     console.log('[PUSH] FCM push registered: ', Boolean(result));
