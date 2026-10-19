@@ -3435,3 +3435,11 @@
 "PushLogDescription" = "Records notification activity when the app is open or receives a background push. The latest 1,000 events are kept on this device for up to 7 days, without message contents. Export the log when notifications stop working.";
 "PushLogFailed" = "Couldn't complete the notification diagnostics action. Please try again.";
 "PushLogCleared" = "Notification log cleared.";
+"PushMessageDeleted" = "Message deleted";
+"PushMessagesRead" = "Messages marked as read";
+"PushReactionsRead" = "Reactions marked as read";
+"PushStoriesRead" = "Stories marked as read";
+"PushStoryDeleted" = "Story deleted";
+"PushMutedMessage" = "New message in a muted chat";
+"PushLiveLocationUpdate" = "Live location update requested";
+"PushSessionCheck" = "Open the app to check your sign-in";

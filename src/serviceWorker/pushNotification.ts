@@ -1,6 +1,10 @@
+import type { ApiReaction } from '../api/types';
 import type { PushDiagnosticTrace } from '../util/pushDiagnostics';
+import type { PushNotificationContext } from '../util/pushNotificationContext';
 
 import { APP_NAME, DEBUG, DEBUG_MORE } from '../config';
+import { IdbStore } from '../util/browser/idb';
+import { toChannelId } from '../util/entities/ids';
 import { isChatHidden } from '../util/hiddenChats';
 import { isInternalChat } from '../util/internalChats';
 import {
@@ -9,15 +13,15 @@ import {
 import {
   createPushDiagnosticTrace, flushPushDiagnosticTrace, recordPushDiagnosticStep,
 } from '../util/pushDiagnostics';
-import { decryptTelegramPush, loadPushSecret } from '../util/telegramPushSecret';
+import {
+  checkIfControlPush, checkIfMessagePushType, getPushNotificationContext,
+} from '../util/pushNotificationContext';
+import { decryptTelegramPush, loadPushSecret, loadRegisteredPushSecret } from '../util/telegramPushSecret';
 import trimText from '../util/trimText';
 
 declare const self: ServiceWorkerGlobalScope;
 
-enum Boolean {
-  True = '1',
-  False = '0',
-}
+type PushFlag = '0' | '1';
 
 type PushData = {
   date?: number;
@@ -27,41 +31,65 @@ type PushData = {
     channel_id?: string;
     chat_id?: string;
     from_id?: string;
+    max_id?: string;
+    messages?: string;
+    story_id?: string;
+    top_msg_id?: string;
+    topic_id?: string;
+    edit_date?: string;
+    call_id?: string;
   };
-  mute: Boolean;
-  badge: Boolean;
+  user_id?: string;
+  mute: PushFlag;
+  badge?: number | string;
   loc_key: string;
   loc_args: string[];
   random_id: number;
   title: string;
   description: string;
+  hasPreviewText?: boolean;
 };
 
 type NotificationData = {
+  userId?: string;
+  shouldHidePreview?: boolean;
   messageId?: number;
   chatId?: string;
   title: string;
   body: string;
   isSilent?: boolean;
   icon?: string;
-  reaction?: string;
+  reaction?: ApiReaction;
+  isReaction?: boolean;
+  storyId?: number;
+  threadId?: number;
+  editDate?: number;
+  eventKind?: NotificationEventKind;
   shouldReplaceHistory?: boolean;
   sentAt?: number;
 };
 
 type FocusMessageData = {
+  userId?: string;
   chatId?: string;
   messageId?: number;
-  reaction?: string;
+  reaction?: ApiReaction;
+  storyId?: number;
+  threadId?: number;
   shouldReplaceHistory?: boolean;
 };
 
 type CloseNotificationData = {
+  userId?: string;
+  threadId?: number;
   lastReadInboxMessageId?: number;
   chatId: string;
 };
 
 const APP_NOTIFICATION_TAG = 'justchat';
+const UNSCOPED_NOTIFICATION_TAG = 'justchat-unscoped';
+const PUSH_FLAG_TRUE = '1';
+const PUSH_FLAG_FALSE = '0';
 const MAX_INBOX_CHATS = 8;
 const MAX_LINES_PER_CHAT = 5;
 const MAX_ROW_LENGTH = 60;
@@ -69,12 +97,27 @@ const SECONDS_TO_MS = 1000;
 const UNIX_MS_THRESHOLD = 1e12;
 const ROW_WHITESPACE_RE = /\s+/g;
 const HIDDEN_SERVICE_LOC_KEYS = new Set(['AUTH_UNKNOWN', 'AUTH_REGION', 'DC_UPDATE']);
+const PRIVATE_PUSH_TYPES = new Set([
+  'LOCKED_MESSAGE', 'STORY_HIDDEN_AUTHOR', 'REACT_HIDDEN', 'REACT_STORY_HIDDEN',
+  'ENCRYPTION_REQUEST', 'ENCRYPTION_ACCEPT', 'ENCRYPTED_MESSAGE',
+]);
 const EMPTY_WAKE_WAIT_MS = 3000;
+const PAGE_PUSH_WAIT_MS = 2000;
 const GENERIC_PUSH_DESCRIPTION = 'New message';
 const FCM_JSON_FIELD_RE = /^[[{]/;
+const MESSAGE_PUSH_TYPE_RE = /^(?:CHAT_|CHANNEL_)?(?:MESSAGE_([A-Z_]+)|(MESSAGES))$/;
 const PUSH_NOTIFICATION_TYPE_RE = /^[A-Z_0-9]{1,64}$/;
 const IS_SAFARI = /applewebkit/i.test(self.navigator.userAgent)
   && !/Chrom(e|ium)\//.test(self.navigator.userAgent);
+const PUSH_INBOX_STORE = new IdbStore('tt-push-inbox');
+const PUSH_INBOX_KEY = 'inbox';
+const DEFAULT_NOTIFICATION_ICON = 'icon-192x192.png';
+const SAFARI_NOTIFICATION_LIFETIME_MS = 31 * 1000;
+const PUSH_STORAGE_TIMEOUT_MS = 2000;
+
+type NotificationEventKind = 'message' | 'reaction' | 'story' | 'storyReaction';
+type InboxMessage = Pick<NotificationData,
+  'body' | 'messageId' | 'storyId' | 'threadId' | 'editDate' | 'sentAt' | 'reaction' | 'eventKind'>;
 
 type InboxEntry = {
   chatId?: string;
@@ -82,7 +125,11 @@ type InboxEntry = {
   bodies: string[];
   messageId?: number;
   icon?: string;
-  reaction?: string;
+  reaction?: ApiReaction;
+  messages?: InboxMessage[];
+  storyId?: number;
+  threadId?: number;
+  eventKind?: NotificationEventKind;
   isSilent?: boolean;
   shouldReplaceHistory?: boolean;
   sentAt?: number;
@@ -94,18 +141,29 @@ type AppNotificationOptions = NotificationOptions & {
 
 type NotificationTrace = {
   id: number;
-  source: 'push' | 'showMessageNotification' | 'closeMessageNotifications' | 'dismissChatlessNotification';
+  source: 'push' | 'showMessageNotification' | 'closeMessageNotifications' | 'dismissChatlessNotification'
+    | 'deleteMessageNotifications' | 'updateMessageNotification';
   diagnostic: PushDiagnosticTrace;
   hasNotificationRequestResolved?: boolean;
   skipReason?: string;
   notificationType?: string;
   notificationTask?: Promise<void>;
+  isPayloadAuthenticated?: boolean;
+  authenticatedUserId?: string;
+  hasPayloadUserId?: boolean;
+  hasAccountContext?: boolean;
+  recipientUserId?: string;
 };
 
 const inboxByChatKey = new Map<string, InboxEntry>();
-const shownNotifications = new Set();
+const shownNotifications = new Set<string>();
+const pendingPageNotifications = new Set<NotificationData>();
 const clickBuffer: Record<string, NotificationData> = {};
 let restorePromise: Promise<void> | undefined;
+let hasRestoredInbox = false;
+let inboxUserId: string | undefined;
+let notificationContext: PushNotificationContext | undefined;
+let notificationQueue = Promise.resolve();
 let lastPreviewPushAt = 0;
 let lastEmptyWakeShownAt = 0;
 let lastNotificationTraceId = 0;
@@ -152,23 +210,26 @@ function normalizePushPayload(payload: any): PushData | undefined {
   const notification = payload.notification;
   const title = source.title
     || notification?.title
-    || (locArgs.length > 1 ? locArgs[0] : undefined);
+    || (source.loc_key?.startsWith('CHAT_') ? locArgs[1] : locArgs[0]);
   const description = source.description
     || notification?.body
-    || locArgs[locArgs.length - 1];
-  if (!source.custom && !source.loc_key && !description) return undefined;
+    || source.message
+    || (source.loc_key?.endsWith('_TEXT') ? locArgs[locArgs.length - 1] : undefined);
+  if (!source.custom && !source.loc_key && !description && source.badge === undefined) return undefined;
 
   return {
     ...source,
     custom,
     loc_args: locArgs,
     loc_key: source.loc_key || 'MESSAGE_TEXT',
-    mute: source.mute ?? Boolean.False,
-    badge: source.badge ?? Boolean.True,
+    mute: String(source.mute ?? PUSH_FLAG_FALSE) === PUSH_FLAG_TRUE ? PUSH_FLAG_TRUE : PUSH_FLAG_FALSE,
+    badge: source.badge,
+    user_id: source.user_id === undefined ? undefined : String(source.user_id),
     random_id: Number(source.random_id) || Date.now(),
     date: source.date ? Number(source.date) : undefined,
     title: title || JUST_CHAT_TITLE,
     description: description || GENERIC_PUSH_DESCRIPTION,
+    hasPreviewText: Boolean(description) || undefined,
   };
 }
 
@@ -216,8 +277,7 @@ function parseFcmField(value: string) {
 function buildGenericPushData(): PushData {
   return {
     custom: {},
-    mute: Boolean.False,
-    badge: Boolean.True,
+    mute: PUSH_FLAG_FALSE,
     loc_key: 'MESSAGE_TEXT',
     loc_args: [],
     random_id: Date.now(),
@@ -227,13 +287,16 @@ function buildGenericPushData(): PushData {
 }
 
 function getChatId(data: PushData) {
-  if (data.custom.from_id) {
-    return data.custom.from_id;
+  if (data.custom.channel_id) {
+    return toChannelId(String(data.custom.channel_id));
   }
 
-  // Chats and channels have “negative” IDs
-  if (data.custom.chat_id || data.custom.channel_id) {
-    return `-${data.custom.chat_id || data.custom.channel_id}`;
+  if (data.custom.chat_id) {
+    return `-${data.custom.chat_id}`;
+  }
+
+  if (data.custom.from_id) {
+    return String(data.custom.from_id);
   }
 
   return undefined;
@@ -241,7 +304,18 @@ function getChatId(data: PushData) {
 
 function getMessageId(data: PushData) {
   if (!data.custom.msg_id) return undefined;
-  return parseInt(data.custom.msg_id, 10);
+  return parsePushId(data.custom.msg_id);
+}
+
+function parsePushId(value: unknown) {
+  if (typeof value !== 'string' && typeof value !== 'number') return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function parsePushIds(value: unknown) {
+  if (typeof value !== 'string' && typeof value !== 'number') return [];
+  return String(value).split(',').map(parsePushId).filter((id): id is number => id !== undefined);
 }
 
 function toNotificationTimestamp(date?: number) {
@@ -261,22 +335,52 @@ function clampNotificationTimestamp(sentAt?: number) {
   return Math.min(sentAt, Date.now());
 }
 
-function getNotificationData(data: PushData): NotificationData {
+function getNotificationData(data: PushData, context?: PushNotificationContext): NotificationData {
   const chatId = getChatId(data);
+  const isReaction = data.loc_key.startsWith('REACT_') || data.loc_key.startsWith('CHAT_REACT_');
+  const isStory = data.loc_key.startsWith('STORY_');
+  const storyId = parsePushId(data.custom.story_id);
+  const eventKind = isReaction ? (storyId ? 'storyReaction' : 'reaction') : (isStory ? 'story' : 'message');
+  const canShowPreview = data.user_id && data.user_id === context?.userId
+    && context.hasWebNotifications && !context.isScreenLocked && !context.hasPasscode
+    && !PRIVATE_PUSH_TYPES.has(data.loc_key)
+    && Boolean(chatId && context.shouldShowPreviewsByChatId[chatId]);
   let title = (isOfficialTelegramServiceChat(chatId) ? JUST_CHAT_TITLE : data.title) || APP_NAME;
-  const isSilent = data.custom?.silent === Boolean.True;
+  const isSilent = String(data.custom.silent) === PUSH_FLAG_TRUE || isReaction;
   if (isSilent) {
     title += ' 🔕';
   }
   return {
     chatId,
+    userId: data.user_id,
+    shouldHidePreview: PRIVATE_PUSH_TYPES.has(data.loc_key) || undefined,
     messageId: getMessageId(data),
-    body: data.description,
+    body: canShowPreview ? getPushMessageBody(data, context) : context?.messageText || '',
     isSilent,
-    title,
+    title: canShowPreview ? title : APP_NAME,
+    isReaction: isReaction || undefined,
+    storyId,
+    threadId: parsePushId(data.custom.top_msg_id || data.custom.topic_id),
+    editDate: parsePushId(data.custom.edit_date),
+    eventKind,
     icon: isOfficialTelegramServiceChat(chatId) ? 'icon-192x192.png' : undefined,
     sentAt: toNotificationTimestamp(data.date),
   };
+}
+
+function getPushMessageBody(data: PushData, context: PushNotificationContext) {
+  if (data.hasPreviewText) return data.description;
+
+  const typeMatch = data.loc_key.match(MESSAGE_PUSH_TYPE_RE);
+  const messageType = typeMatch?.[1] || typeMatch?.[2];
+  if (!messageType || !checkIfMessagePushType(messageType)) return data.description;
+
+  const messageText = context.messageTexts?.[messageType];
+  if (messageText) return messageText;
+  if (messageType === 'PHOTO') return context.photoText || context.messageText;
+  if (messageType === 'VIDEO') return context.videoText || context.messageText;
+  if (messageType === 'DOC') return context.fileText || context.messageText;
+  return context.messageText;
 }
 
 async function getClients() {
@@ -315,12 +419,25 @@ function isInboxEntry(value: unknown): value is InboxEntry {
 }
 
 function restoreInbox() {
-  if (inboxByChatKey.size) return Promise.resolve();
+  if (hasRestoredInbox && inboxUserId === notificationContext?.userId) return Promise.resolve();
   if (restorePromise) return restorePromise;
 
   restorePromise = (async () => {
-    const notifications = await self.registration.getNotifications({ tag: APP_NOTIFICATION_TAG });
-    const stored = notifications[0]?.data?.entries;
+    const saved = await waitForInboxStorage(
+      PUSH_INBOX_STORE.get<{ userId?: string; entries: InboxEntry[] }>(PUSH_INBOX_KEY),
+    );
+    inboxByChatKey.clear();
+    shownNotifications.clear();
+    inboxUserId = notificationContext?.userId;
+    hasRestoredInbox = true;
+    if (saved && saved.userId !== inboxUserId) return;
+    const notifications = saved || !inboxUserId ? []
+      : (await self.registration.getNotifications({ tag: APP_NOTIFICATION_TAG }))
+        .filter((notification) => notification.data?.userId === inboxUserId);
+    const latestNotification = notifications.reduce<Notification | undefined>((latest, current) => {
+      return (current.data?.inboxUpdatedAt || 0) > (latest?.data?.inboxUpdatedAt || 0) ? current : latest || current;
+    }, undefined);
+    const stored = saved?.entries || latestNotification?.data?.entries;
     if (!Array.isArray(stored)) return;
 
     stored.forEach((entry) => {
@@ -334,6 +451,79 @@ function restoreInbox() {
   return restorePromise;
 }
 
+function enqueueNotificationTask(task: () => Promise<unknown>) {
+  const pendingTask = notificationQueue.then(task);
+  notificationQueue = pendingTask.then(() => undefined, () => undefined);
+  return pendingTask;
+}
+
+function saveInbox() {
+  sanitizeStoredInbox();
+  return waitForInboxStorage(PUSH_INBOX_STORE.set(PUSH_INBOX_KEY, {
+    userId: inboxUserId,
+    entries: Array.from(inboxByChatKey.values()),
+  }));
+}
+
+async function waitForInboxStorage<T>(task: Promise<T>) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutTask = new Promise<undefined>((resolve) => {
+    timeout = setTimeout(resolve, PUSH_STORAGE_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([task, timeoutTask]);
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function sanitizeStoredInbox() {
+  inboxByChatKey.forEach((entry, key) => {
+    if (checkIfCanShowPreview({ chatId: entry.chatId })) return;
+    const preview = sanitizeNotification({ chatId: entry.chatId, title: entry.title, body: '', icon: entry.icon });
+    const messages = getInboxMessages(entry).map((message) => ({ ...message, body: preview.body }));
+    updateInboxMessages(key, { ...entry, title: preview.title, icon: preview.icon }, messages);
+  });
+}
+
+function getInboxMessages(entry: InboxEntry): InboxMessage[] {
+  if (entry.messages) return entry.messages;
+  return entry.bodies.map((body, index) => ({
+    body,
+    messageId: index === entry.bodies.length - 1 ? entry.messageId : undefined,
+    eventKind: entry.eventKind || (entry.reaction ? 'reaction' : 'message'),
+    storyId: entry.storyId,
+    threadId: entry.threadId,
+  }));
+}
+
+function getNotificationKey(notification: Pick<NotificationData,
+  'chatId' | 'messageId' | 'storyId' | 'isReaction' | 'eventKind'>) {
+  const eventKind = notification.eventKind || (notification.isReaction ? 'reaction' : 'message');
+  return `${notification.chatId || '0'}:${eventKind}:${notification.storyId || notification.messageId || '0'}`;
+}
+
+function updateInboxMessages(key: string, entry: InboxEntry, messages: InboxMessage[]) {
+  if (!messages.length) {
+    inboxByChatKey.delete(key);
+    return;
+  }
+  const latest = messages[messages.length - 1];
+  inboxByChatKey.set(key, {
+    ...entry,
+    messages,
+    bodies: messages.map((message) => message.body),
+    messageId: latest.messageId,
+    storyId: latest.storyId,
+    threadId: latest.threadId,
+    eventKind: latest.eventKind,
+    reaction: latest.reaction,
+    sentAt: latest.sentAt,
+  });
+}
+
 function rememberInboxEntry(notification: NotificationData) {
   const key = getInboxKey(notification.chatId);
   // A real sender replaces the closed-app "New message" row
@@ -341,19 +531,43 @@ function rememberInboxEntry(notification: NotificationData) {
     inboxByChatKey.delete(getInboxKey(undefined));
   }
   const previous = inboxByChatKey.get(key);
-  if (previous && notification.messageId && previous.messageId === notification.messageId) {
+  const previousMessages = previous ? getInboxMessages(previous) : [];
+  const eventKind = notification.eventKind || (notification.isReaction ? 'reaction' : 'message');
+  const matchingIndex = previousMessages.findIndex((message) => {
+    return (notification.messageId !== undefined || notification.storyId !== undefined)
+      && message.messageId === notification.messageId && message.storyId === notification.storyId
+      && message.eventKind === eventKind;
+  });
+  const isReaction = eventKind === 'reaction' || eventKind === 'storyReaction';
+  if (matchingIndex >= 0 && !notification.editDate
+    && (!isReaction || previousMessages[matchingIndex].body === notification.body)) {
     return false;
   }
 
-  const bodies = [...(previous?.bodies || []), notification.body].slice(-MAX_LINES_PER_CHAT);
+  const message: InboxMessage = {
+    body: notification.body,
+    messageId: notification.messageId,
+    storyId: notification.storyId,
+    threadId: notification.threadId,
+    editDate: notification.editDate,
+    sentAt: notification.sentAt,
+    eventKind,
+    reaction: notification.reaction,
+  };
+  if (matchingIndex >= 0) previousMessages.splice(matchingIndex, 1);
+  const messages = [...previousMessages, message].slice(-MAX_LINES_PER_CHAT);
   inboxByChatKey.delete(key);
   inboxByChatKey.set(key, {
     chatId: notification.chatId,
     title: notification.title,
-    bodies,
+    bodies: messages.map((item) => item.body),
+    messages,
     messageId: notification.messageId,
     icon: notification.icon || previous?.icon,
     reaction: notification.reaction,
+    storyId: notification.storyId,
+    threadId: notification.threadId,
+    eventKind,
     isSilent: notification.isSilent,
     shouldReplaceHistory: notification.shouldReplaceHistory,
     sentAt: latestSentAt(previous?.sentAt, notification.sentAt),
@@ -369,6 +583,7 @@ function rememberInboxEntry(notification: NotificationData) {
 }
 
 function buildGroupedNotification(shouldAlert: boolean, incomingSentAt?: number) {
+  sanitizeStoredInbox();
   const entries = Array.from(inboxByChatKey.values()).reverse();
   const onlyEntry = entries.length === 1 ? entries[0] : undefined;
   const title = onlyEntry ? onlyEntry.title : APP_NAME;
@@ -394,6 +609,11 @@ function buildGroupedNotification(shouldAlert: boolean, incomingSentAt?: number)
       reaction: onlyEntry?.reaction,
       count: messageCount,
       shouldReplaceHistory: onlyEntry?.shouldReplaceHistory,
+      storyId: onlyEntry?.storyId,
+      threadId: onlyEntry?.threadId,
+      userId: inboxUserId,
+      eventKind: onlyEntry?.eventKind,
+      inboxUpdatedAt: Date.now(),
       entries: Array.from(inboxByChatKey.values()),
     },
     icon: onlyEntry?.icon || 'icon-192x192.png',
@@ -422,9 +642,10 @@ async function publishInbox(shouldAlert: boolean, incomingSentAt?: number, trace
     ? buildGroupedNotification(shouldAlert, incomingSentAt)
     : undefined;
   logNotificationTrace(trace, 'readingNotifications');
-  const notifications = await self.registration.getNotifications();
-  // The previous card is closed first so this alert gets a new clock
-  notifications.forEach((notification) => notification.close());
+  if (!IS_SAFARI) {
+    const notifications = await self.registration.getNotifications({ tag: APP_NOTIFICATION_TAG });
+    notifications.forEach((notification) => notification.close());
+  }
 
   if (!grouped) {
     logNotificationTrace(trace, 'skipEmptyInbox');
@@ -459,14 +680,51 @@ async function publishNotification(title: string, options: NotificationOptions, 
   }
 }
 
-async function showNotification(notification: NotificationData, trace?: NotificationTrace) {
+function showNotification(notification: NotificationData, trace?: NotificationTrace) {
+  return enqueueNotificationTask(() => publishMessageNotification(notification, trace));
+}
+
+async function showPageNotification(
+  notification: NotificationData, shouldWaitForPush: boolean, trace: NotificationTrace,
+) {
+  if (shouldWaitForPush) {
+    logNotificationTrace(trace, 'waitingForPushPreview');
+    pendingPageNotifications.add(notification);
+    // The grace period runs outside the queue so a push can publish immediately
+    await waitFor(PAGE_PUSH_WAIT_MS);
+  }
+  return enqueueNotificationTask(async () => {
+    if (shouldWaitForPush && !pendingPageNotifications.delete(notification)) {
+      logNotificationTrace(trace, 'skipCancelledPageNotification');
+      return;
+    }
+    await publishMessageNotification(notification, trace);
+    if (trace.hasNotificationRequestResolved) shownNotifications.add(getNotificationKey(notification));
+  });
+}
+
+async function publishMessageNotification(notification: NotificationData, trace?: NotificationTrace) {
+  notificationContext = await getPushNotificationContext();
+  if (!notification.userId || !notificationContext?.userId) {
+    logNotificationTrace(trace, notification.userId ? 'skipAccountContextUnavailable' : 'skipMissingAccount');
+    if (trace?.source === 'push') await showUnscopedPushNotification(trace);
+    return;
+  }
+  if (notification.userId !== notificationContext.userId) {
+    logNotificationTrace(trace, 'skipOtherAccount');
+    return;
+  }
+  notification = sanitizeNotification(notification);
   logNotificationTrace(trace, 'restoringInbox');
   await restoreInbox();
   const hadWakeRow = inboxByChatKey.has(getInboxKey(undefined));
   if (!rememberInboxEntry(notification)) {
     // A duplicate preview still replaces the closed-app "New message" row
     if (hadWakeRow && notification.chatId) {
-      await publishInbox(false, undefined, trace);
+      await saveInbox();
+      if (IS_SAFARI && trace?.source === 'push') return showDuplicatePushNotification(notification, trace);
+      if (!IS_SAFARI) await publishInbox(false, undefined, trace);
+      else logNotificationTrace(trace, 'skipDuplicateInboxEntry');
     } else if (IS_SAFARI && trace?.source === 'push') {
       return showDuplicatePushNotification(notification, trace);
     } else {
@@ -475,58 +733,190 @@ async function showNotification(notification: NotificationData, trace?: Notifica
     return undefined;
   }
 
-  const shouldAlert = !notification.reaction && !notification.isSilent;
+  await saveInbox();
+  const shouldAlert = !notification.isReaction && !notification.isSilent;
   // TODO Update condition when reaction badges are implemented
   const soundTask = shouldAlert
     ? playNotificationSound(String(notification.messageId) || notification.chatId || '')
     : undefined;
-  const notificationTask = publishInbox(shouldAlert, notification.sentAt, trace);
+  const notificationTask = IS_SAFARI
+    ? publishSingleNotification(notification, shouldAlert, trace)
+    : publishInbox(shouldAlert, notification.sentAt, trace);
   if (trace) trace.notificationTask = notificationTask;
 
   return Promise.all([soundTask, notificationTask]);
 }
 
-function showDuplicatePushNotification(notification: NotificationData, trace: NotificationTrace) {
+async function showDuplicatePushNotification(notification: NotificationData, trace: NotificationTrace) {
+  notificationContext = await getPushNotificationContext();
+  await restoreInbox();
   logNotificationTrace(trace, 'duplicatePushNotificationRequested');
-  if (notification.chatId) inboxByChatKey.delete(getInboxKey(undefined));
-  const inboxEntry = inboxByChatKey.get(getInboxKey(notification.chatId));
-  const previewEntry = notification.messageId !== undefined && inboxEntry?.messageId === notification.messageId
-    ? inboxEntry : undefined;
-  // Only a matching stored preview supplies visible message content
+  if (notification.userId === inboxUserId && notification.chatId) inboxByChatKey.delete(getInboxKey(undefined));
+  await saveInbox();
+  return showGenericPushNotification(trace);
+}
+
+function sanitizeNotification(notification: NotificationData): NotificationData {
+  if (checkIfCanShowPreview(notification)) return notification;
+  return {
+    ...notification,
+    title: APP_NAME,
+    body: notificationContext?.messageText || '',
+    icon: undefined,
+  };
+}
+
+function checkIfCanShowPreview(notification: Pick<NotificationData, 'chatId' | 'shouldHidePreview'>) {
+  const canShowPreview = notificationContext?.hasWebNotifications && !notificationContext.isScreenLocked
+    && !notificationContext.hasPasscode && !notification.shouldHidePreview
+    && Boolean(notification.chatId && notificationContext.shouldShowPreviewsByChatId[notification.chatId]);
+  return Boolean(canShowPreview);
+}
+
+function publishSingleNotification(notification: NotificationData, shouldAlert: boolean, trace?: NotificationTrace) {
+  notification = sanitizeNotification(notification);
   const options: NotificationOptions = {
-    body: previewEntry?.bodies[previewEntry.bodies.length - 1],
+    body: notification.body,
     data: {
       chatId: notification.chatId,
       messageId: notification.messageId,
       reaction: notification.reaction,
       shouldReplaceHistory: notification.shouldReplaceHistory,
+      storyId: notification.storyId,
+      threadId: notification.threadId,
+      userId: inboxUserId,
+      eventKind: notification.eventKind || (notification.isReaction ? 'reaction' : 'message'),
+      inboxUpdatedAt: Date.now(),
       count: 1,
       entries: Array.from(inboxByChatKey.values()),
     },
-    icon: previewEntry?.icon || 'icon-192x192.png',
-    badge: 'icon-192x192.png',
+    icon: notification.icon || DEFAULT_NOTIFICATION_ICON,
+    badge: DEFAULT_NOTIFICATION_ICON,
     tag: APP_NOTIFICATION_TAG,
-    silent: true,
+    silent: !shouldAlert,
   };
-  const notificationTask = publishNotification(previewEntry?.title || APP_NAME, options, trace);
-  trace.notificationTask = notificationTask;
+  const notificationTask = publishNotification(notification.title, options, trace);
+  if (trace) trace.notificationTask = notificationTask;
   return notificationTask;
 }
 
 async function closeNotifications({
+  userId,
+  threadId,
   chatId,
   lastReadInboxMessageId,
 }: CloseNotificationData, trace?: NotificationTrace) {
   // Only an inbox read cursor dismisses the alert
   if (!lastReadInboxMessageId) return;
 
+  return enqueueNotificationTask(() => removeInboxNotifications(chatId, (message) => {
+    return message.eventKind === 'message'
+      && (threadId === undefined || message.threadId === threadId)
+      && (message.messageId === undefined || message.messageId <= lastReadInboxMessageId);
+  }, trace, userId));
+}
+
+async function removeInboxNotifications(
+  chatId: string, shouldRemove: (message: InboxMessage) => boolean, trace?: NotificationTrace, userId?: string,
+) {
+  notificationContext = await getPushNotificationContext();
+  if (!userId || userId !== notificationContext?.userId) {
+    logNotificationTrace(trace, 'skipOtherAccount');
+    return;
+  }
+  pendingPageNotifications.forEach((notification) => {
+    if (notification.userId === userId && notification.chatId === chatId
+      && shouldRemove({
+        ...notification,
+        eventKind: notification.eventKind || (notification.isReaction ? 'reaction' : 'message'),
+      })) {
+      pendingPageNotifications.delete(notification);
+    }
+  });
   await restoreInbox();
   const key = getInboxKey(chatId);
   const entry = inboxByChatKey.get(key);
-  if (!entry || (entry.messageId !== undefined && entry.messageId > lastReadInboxMessageId)) return;
+  let hasChanged = false;
+  if (entry) {
+    const messages = getInboxMessages(entry);
+    const remainingMessages = messages.filter((message) => !shouldRemove(message));
+    if (remainingMessages.length !== messages.length) {
+      hasChanged = true;
+      messages.filter(shouldRemove).forEach((message) => {
+        shownNotifications.delete(getNotificationKey({ ...message, chatId }));
+      });
+      updateInboxMessages(key, entry, remainingMessages);
+      await saveInbox();
+      logNotificationTrace(trace, 'inboxUpdated');
+    }
+  }
+  if (!IS_SAFARI) {
+    if (hasChanged) await publishInbox(false, undefined, trace);
+    return;
+  }
+  const notifications = await self.registration.getNotifications({ tag: APP_NOTIFICATION_TAG });
+  notifications.forEach((notification) => {
+    const data = notification.data;
+    if (data?.userId !== userId || data.chatId !== chatId || !data.inboxUpdatedAt
+      || Date.now() - data.inboxUpdatedAt < SAFARI_NOTIFICATION_LIFETIME_MS) return;
+    if (shouldRemove({
+      body: notification.body,
+      messageId: data.messageId,
+      storyId: data.storyId,
+      threadId: data.threadId,
+      eventKind: data.eventKind || 'message',
+    })) notification.close();
+  });
+}
 
-  inboxByChatKey.delete(key);
-  await publishInbox(false, undefined, trace);
+function deleteMessageNotifications(
+  { chatId, messageIds, userId }: { chatId: string; messageIds: number[]; userId?: string }, trace?: NotificationTrace,
+) {
+  const deletedIds = new Set(messageIds);
+  return enqueueNotificationTask(() => removeInboxNotifications(chatId, (message) => {
+    return (message.eventKind === 'message' || message.eventKind === 'reaction')
+      && (message.messageId === undefined || deletedIds.has(message.messageId));
+  }, trace, userId));
+}
+
+function updateMessageNotification(notification: NotificationData, trace?: NotificationTrace) {
+  return enqueueNotificationTask(async () => {
+    notificationContext = await getPushNotificationContext();
+    if (!notification.userId || notification.userId !== notificationContext?.userId) return;
+    notification = sanitizeNotification(notification);
+    pendingPageNotifications.forEach((pendingNotification) => {
+      if (pendingNotification.userId === notification.userId && pendingNotification.chatId === notification.chatId
+        && pendingNotification.messageId === notification.messageId) {
+        pendingNotification.title = notification.title;
+        pendingNotification.body = notification.body;
+        pendingNotification.icon = notification.icon;
+      }
+    });
+    await restoreInbox();
+    const key = getInboxKey(notification.chatId);
+    const entry = inboxByChatKey.get(key);
+    if (!entry) return;
+    let hasChanged = false;
+    const messages = getInboxMessages(entry).map((message) => {
+      if (message.eventKind !== 'message' || message.messageId !== notification.messageId) return message;
+      hasChanged = true;
+      return { ...message, body: notification.body, editDate: notification.editDate };
+    });
+    if (!hasChanged) return;
+    updateInboxMessages(key, { ...entry, title: notification.title, icon: notification.icon }, messages);
+    await saveInbox();
+    const notifications = await self.registration.getNotifications({ tag: APP_NOTIFICATION_TAG });
+    if (!notifications.length) return;
+    if (IS_SAFARI) {
+      if (notifications.some((current) => current.data?.userId === notification.userId
+        && current.data?.chatId === notification.chatId
+        && current.data?.messageId === notification.messageId)) {
+        await publishSingleNotification(notification, false, trace);
+      }
+      return;
+    }
+    await publishInbox(false, undefined, trace);
+  });
 }
 
 async function checkIfAppIsVisible(trace?: NotificationTrace) {
@@ -538,9 +928,9 @@ async function checkIfAppIsVisible(trace?: NotificationTrace) {
   return isAppVisible;
 }
 
-async function showPreviewWhenAppIsHidden(notification: NotificationData, trace?: NotificationTrace) {
-  // A visible window decides on its own whether the message needs an alert
-  if (await checkIfAppIsVisible(trace)) {
+async function showPushPreview(notification: NotificationData, trace?: NotificationTrace) {
+  // Safari requires a visible notification for the push even when a window is open
+  if (!IS_SAFARI && await checkIfAppIsVisible(trace)) {
     logNotificationTrace(trace, 'skipAppVisible');
     return;
   }
@@ -575,12 +965,16 @@ function waitFor(ms: number) {
   });
 }
 
-async function dismissChatlessNotification(trace?: NotificationTrace) {
-  await restoreInbox();
-  const key = getInboxKey(undefined);
-  if (!inboxByChatKey.has(key)) return;
-  inboxByChatKey.delete(key);
-  await publishInbox(false, undefined, trace);
+function dismissChatlessNotification(trace?: NotificationTrace) {
+  return enqueueNotificationTask(async () => {
+    notificationContext = await getPushNotificationContext();
+    await restoreInbox();
+    const key = getInboxKey(undefined);
+    if (!inboxByChatKey.has(key)) return;
+    inboxByChatKey.delete(key);
+    await saveInbox();
+    if (!IS_SAFARI) await publishInbox(false, undefined, trace);
+  });
 }
 
 export function handlePush(e: PushEvent) {
@@ -591,80 +985,225 @@ export function handlePush(e: PushEvent) {
   e.waitUntil(trackNotificationTask(processPush(raw, trace), trace));
 }
 
-async function processPush(raw: unknown, trace?: NotificationTrace) {
+async function processPush(raw: unknown, trace: NotificationTrace) {
+  const context = await getPushNotificationContext();
   logNotificationTrace(trace, 'readingPayload');
   const payload = await decryptFcmPush(raw, trace);
   logNotificationTrace(trace, 'payloadReady');
+  const data = rawToPushData(payload);
+  trace.hasPayloadUserId = Boolean(data.user_id);
+  trace.hasAccountContext = Boolean(context?.userId);
+  if (data.user_id && trace.authenticatedUserId && data.user_id !== trace.authenticatedUserId) {
+    logNotificationTrace(trace, 'skipRegisteredAccountMismatch');
+    return;
+  }
+  if (!data.user_id && trace.authenticatedUserId) {
+    data.user_id = trace.authenticatedUserId;
+    logNotificationTrace(trace, 'pushAccountResolvedFromRegistration');
+  }
+  if (data.user_id && context?.userId && data.user_id !== context.userId) {
+    logNotificationTrace(trace, 'skipOtherAccount');
+    return;
+  }
   // A badge-only push carries no message; the open app or a preview push shows that message
   if (isBadgeOnlyPush(payload)) {
+    if (data.user_id && data.user_id === context?.userId) await updateAppBadge(data.badge, trace);
     logNotificationTrace(trace, 'skipBadgeOnly');
     return undefined;
   }
 
-  const data = rawToPushData(payload);
-  if (trace) {
-    const notificationType = data.loc_key;
-    trace.notificationType = typeof notificationType === 'string' && PUSH_NOTIFICATION_TYPE_RE.test(notificationType)
-      ? notificationType : undefined;
-    logNotificationTrace(trace, 'payloadClassified');
+  const notificationType = data.loc_key;
+  trace.notificationType = typeof notificationType === 'string' && PUSH_NOTIFICATION_TYPE_RE.test(notificationType)
+    ? notificationType : undefined;
+  logNotificationTrace(trace, 'payloadClassified');
+  const isControlPush = checkIfControlPush(data.loc_key);
+
+  if (!data.user_id || !context?.userId) {
+    logNotificationTrace(trace, data.user_id ? 'skipAccountContextUnavailable' : 'skipMissingAccount');
+    if (!isControlPush && !HIDDEN_SERVICE_LOC_KEYS.has(data.loc_key)
+      && data.mute !== PUSH_FLAG_TRUE) {
+      await enqueueNotificationTask(() => showUnscopedPushNotification(trace));
+    }
+    return;
+  }
+  trace.recipientUserId = data.user_id;
+  await updateAppBadge(data.badge, trace);
+
+  if (isControlPush) {
+    if (!data.user_id) {
+      logNotificationTrace(trace, 'skipUnscopedControl');
+      return;
+    }
+    await handleControlPush(data, trace);
+    return;
   }
 
   // Do not show muted notifications
-  if (!data || data.mute === Boolean.True) {
+  if (!data || data.mute === PUSH_FLAG_TRUE) {
     logNotificationTrace(trace, data ? 'skipMuted' : 'skipMissingData');
     return undefined;
   }
 
-  const notification = getNotificationData(data);
+  const notification = getNotificationData(data, context);
+  if (notification.chatId) {
+    const shouldShowPreviews = context.shouldShowPreviewsByChatId[notification.chatId];
+    if (shouldShowPreviews === undefined) {
+      logNotificationTrace(trace, 'previewSettingsUnavailable');
+    } else if (!shouldShowPreviews) {
+      logNotificationTrace(trace, 'previewDisabledForChat');
+    }
+  }
 
   // Login and data-center pushes come from the hidden service account
   if (HIDDEN_SERVICE_LOC_KEYS.has(data.loc_key)) {
     lastPreviewPushAt = Date.now();
+    await notifyClientsOfPushState(data.loc_key, data.user_id);
     logNotificationTrace(trace, 'skipServiceMessage');
     return undefined;
   }
 
-  // A push without a sender carries no message preview. FCM can still include the text in `loc_args`.
+  if (
+    notification.chatId && (isChatHidden(notification.chatId) || isInternalChat(notification.chatId))
+    && !isAdsPlatformLoginText(data.description)
+  ) {
+    logNotificationTrace(trace, 'skipHiddenChat');
+    return undefined;
+  }
+
+  if (context?.hasWebNotifications === false) {
+    logNotificationTrace(trace, 'skipNotificationsDisabled');
+    return;
+  }
+
+  if (notification.editDate) {
+    return updateMessageNotification(notification, trace);
+  }
+
+  if (data.loc_key === 'PHONE_CALL_REQUEST' || data.loc_key === 'PHONE_CALL_MISSED'
+    || data.loc_key === 'CONF_CALL_MISSED') {
+    return enqueueNotificationTask(async () => {
+      notificationContext = await getPushNotificationContext();
+      if (!data.user_id || data.user_id !== notificationContext?.userId) return;
+      const preview = sanitizeNotification(getNotificationData(data, notificationContext));
+      const notificationTask = publishNotification(
+        data.loc_key === 'PHONE_CALL_REQUEST' ? notificationContext?.incomingCallText || APP_NAME : APP_NAME,
+        {
+          body: preview.body,
+          icon: DEFAULT_NOTIFICATION_ICON,
+          tag: `call_${data.custom.call_id || data.random_id}`,
+          data: { callId: data.custom.call_id, userId: notificationContext?.userId },
+          silent: preview.isSilent,
+        }, trace,
+      );
+      if (trace) trace.notificationTask = notificationTask;
+      return notificationTask;
+    });
+  }
+
+  // A push without a sender can carry text, or just wake the app for a later preview
   if (!notification.chatId) {
-    if (notification.body && notification.body !== GENERIC_PUSH_DESCRIPTION) {
+    if (data.description && data.description !== GENERIC_PUSH_DESCRIPTION
+      && data.description !== context?.messageText) {
       lastPreviewPushAt = Date.now();
-      return showPreviewWhenAppIsHidden(notification, trace);
+      return showPushPreview(notification, trace);
     }
     return showWakeWhenAppIsClosed(notification, trace);
   }
 
   lastPreviewPushAt = Date.now();
 
-  if (
-    (isChatHidden(notification.chatId) || isInternalChat(notification.chatId))
-    && !isAdsPlatformLoginText(notification.body)
-  ) {
-    logNotificationTrace(trace, 'skipHiddenChat');
-    return undefined;
-  }
-
   // The page can request a message notification before its push arrives
-  if (shownNotifications.has(notification.messageId)) {
-    shownNotifications.delete(notification.messageId);
+  const notificationKey = getNotificationKey(notification);
+  if (shownNotifications.has(notificationKey)) {
+    shownNotifications.delete(notificationKey);
     if (IS_SAFARI && trace?.source === 'push') {
-      return showDuplicatePushNotification(notification, trace);
+      return enqueueNotificationTask(() => showDuplicatePushNotification(notification, trace));
     }
     logNotificationTrace(trace, 'skipAlreadyShown');
     return dismissChatlessNotification(trace);
   }
 
-  return showPreviewWhenAppIsHidden(notification, trace);
+  return showPushPreview(notification, trace);
+}
+
+async function updateAppBadge(value: PushData['badge'], trace?: NotificationTrace) {
+  if (value === undefined || !/^\d+$/.test(String(value))) return;
+  const count = Number(value);
+  if (!Number.isSafeInteger(count)) return;
+  try {
+    if (!count && 'clearAppBadge' in self.navigator) {
+      await self.navigator.clearAppBadge();
+    } else if ('setAppBadge' in self.navigator) {
+      await self.navigator.setAppBadge(count);
+    }
+  } catch (err) {
+    logNotificationTrace(trace, 'badgeUpdateFailed', err);
+  }
+}
+
+async function handleControlPush(data: PushData, trace?: NotificationTrace) {
+  logNotificationTrace(trace, 'controlPushReceived');
+  const chatId = getChatId(data);
+  const messageIds = new Set(parsePushIds(data.custom.messages));
+  const storyIds = new Set(parsePushIds(data.custom.story_id));
+  const maxId = parsePushId(data.custom.max_id);
+  const threadId = parsePushId(data.custom.topic_id || data.custom.top_msg_id);
+  if (chatId) {
+    await enqueueNotificationTask(() => removeInboxNotifications(chatId, (message) => {
+      if (threadId && message.threadId !== threadId) return false;
+      switch (data.loc_key) {
+        case 'READ_HISTORY':
+          return Boolean(maxId && message.eventKind === 'message'
+            && (message.messageId === undefined || message.messageId <= maxId));
+        case 'READ_REACTION':
+          return message.eventKind === 'reaction' && messageIds.size > 0
+            && (message.messageId === undefined || messageIds.has(message.messageId));
+        case 'MESSAGE_DELETED':
+          return (message.eventKind === 'message' || message.eventKind === 'reaction') && messageIds.size > 0
+            && (message.messageId === undefined || messageIds.has(message.messageId));
+        case 'READ_STORIES':
+          return Boolean(maxId && (message.eventKind === 'story' || message.eventKind === 'storyReaction')
+            && (message.storyId === undefined || message.storyId <= maxId));
+        case 'STORY_DELETED':
+          return (message.eventKind === 'story' || message.eventKind === 'storyReaction') && storyIds.size > 0
+            && (message.storyId === undefined || storyIds.has(message.storyId));
+        default:
+          return false;
+      }
+    }, trace, data.user_id));
+  }
+  if (data.loc_key !== 'SESSION_REVOKE' || (trace?.isPayloadAuthenticated && data.user_id)) {
+    await notifyClientsOfPushState(data.loc_key, data.user_id);
+  }
+}
+
+async function notifyClientsOfPushState(notificationType: string, userId?: string) {
+  const clients = await getClients();
+  clients.forEach((client) => client.postMessage({
+    type: 'pushStateUpdate',
+    payload: { notificationType, userId },
+  }));
 }
 
 // FCM pushes registered with a `secret` carry the Telegram payload encrypted in `data.p`
-async function decryptFcmPush(raw: unknown, trace?: NotificationTrace) {
+async function decryptFcmPush(raw: unknown, trace: NotificationTrace) {
   if (!raw || typeof raw !== 'object' || !isFcmEnvelope(raw)) return raw;
   const encoded = (raw as { data: { p?: unknown } }).data.p;
   if (typeof encoded !== 'string') return raw;
 
   try {
+    const registeredSecret = await loadRegisteredPushSecret();
+    const registeredPayload = registeredSecret
+      ? await decryptTelegramPush(encoded, registeredSecret.secret) : undefined;
+    if (registeredPayload) {
+      trace.isPayloadAuthenticated = true;
+      trace.authenticatedUserId = registeredSecret!.userId;
+      logNotificationTrace(trace, 'payloadDecrypted');
+      return registeredPayload;
+    }
     const secret = await loadPushSecret();
     const payload = secret ? await decryptTelegramPush(encoded, secret) : undefined;
+    trace.isPayloadAuthenticated = Boolean(payload);
     logNotificationTrace(trace, payload ? 'payloadDecrypted' : 'payloadDecryptionUnavailable');
     return payload ?? raw;
   } catch (err) {
@@ -676,7 +1215,7 @@ async function decryptFcmPush(raw: unknown, trace?: NotificationTrace) {
 async function focusChatMessage(client: WindowClient, data: FocusMessageData) {
   if (data.chatId) {
     client.postMessage({
-      type: 'focusMessage',
+      type: data.storyId ? 'focusStory' : 'focusMessage',
       payload: data,
     });
   }
@@ -696,7 +1235,7 @@ async function focusChatMessage(client: WindowClient, data: FocusMessageData) {
 export function handleNotificationClick(e: NotificationEvent) {
   const appUrl = self.registration.scope;
   e.notification.close(); // Android needs explicit close.
-  const { data } = e.notification;
+  const data = e.notification.data || {};
   const notifyClients = async () => {
     const clients = await getClients();
     await Promise.all(clients.map((client) => {
@@ -743,13 +1282,9 @@ export function handleClientMessage(e: ExtendableMessageEvent) {
   if (e.data.type === 'showMessageNotification') {
     const trace = createNotificationTrace('showMessageNotification');
     logNotificationTrace(trace, 'clientMessageReceived');
-    // store messageId for already shown notification
     const notification: NotificationData = e.data.payload;
-    e.waitUntil(trackNotificationTask((async () => {
-      await showNotification(notification, trace);
-      // Mark only after a successful show, so a failed attempt can still arrive via push.
-      shownNotifications.add(notification.messageId);
-    })(), trace));
+    const shouldWaitForPush = IS_SAFARI && e.data.shouldWaitForPush === true;
+    e.waitUntil(trackNotificationTask(showPageNotification(notification, shouldWaitForPush, trace), trace));
   }
 
   if (e.data.type === 'closeMessageNotifications') {
@@ -763,6 +1298,18 @@ export function handleClientMessage(e: ExtendableMessageEvent) {
     logNotificationTrace(trace, 'clientMessageReceived');
     e.waitUntil(trackNotificationTask(dismissChatlessNotification(trace), trace));
   }
+
+  if (e.data.type === 'deleteMessageNotifications') {
+    const trace = createNotificationTrace('deleteMessageNotifications');
+    logNotificationTrace(trace, 'clientMessageReceived');
+    e.waitUntil(trackNotificationTask(deleteMessageNotifications(e.data.payload, trace), trace));
+  }
+
+  if (e.data.type === 'updateMessageNotification') {
+    const trace = createNotificationTrace('updateMessageNotification');
+    logNotificationTrace(trace, 'clientMessageReceived');
+    e.waitUntil(trackNotificationTask(updateMessageNotification(e.data.payload, trace), trace));
+  }
 }
 
 function createNotificationTrace(source: NotificationTrace['source']): NotificationTrace {
@@ -770,24 +1317,76 @@ function createNotificationTrace(source: NotificationTrace['source']): Notificat
   return { id: lastNotificationTraceId, source, diagnostic: createPushDiagnosticTrace(source) };
 }
 
-function trackNotificationTask(task: Promise<unknown>, trace?: NotificationTrace) {
+async function trackNotificationTask(task: Promise<unknown>, trace?: NotificationTrace) {
   if (!trace) return task;
-  return task.then((result) => {
+  try {
+    const result = await task;
     logNotificationTrace(trace, 'processingCompleted');
     return result;
-  }, (err: unknown) => {
+  } catch (err) {
     logNotificationTrace(trace, 'processingFailed', err);
-    throw err;
-  }).finally(async () => {
+    if (!IS_SAFARI || trace.source !== 'push') throw err;
+    return undefined;
+  } finally {
     // A sound failure can settle processing before the notification request finishes
     await trace.notificationTask?.catch(() => undefined);
-    if (trace.source === 'push') {
-      trace.hasNotificationRequestResolved ??= false;
-      logNotificationTrace(trace, trace.hasNotificationRequestResolved
-        ? 'pushNotificationRequestResolved' : 'pushCompletedWithoutNotification');
+    try {
+      if (IS_SAFARI && trace.source === 'push' && !trace.hasNotificationRequestResolved) {
+        await enqueueNotificationTask(() => showGenericPushNotification(trace));
+      }
+    } finally {
+      if (trace.source === 'push') {
+        trace.hasNotificationRequestResolved ??= false;
+        logNotificationTrace(trace, trace.hasNotificationRequestResolved
+          ? 'pushNotificationRequestResolved' : 'pushCompletedWithoutNotification');
+      }
+      await flushPushDiagnosticTrace(trace.diagnostic);
     }
-    await flushPushDiagnosticTrace(trace.diagnostic);
-  });
+  }
+}
+
+async function showGenericPushNotification(trace: NotificationTrace) {
+  notificationContext = await getPushNotificationContext();
+  await restoreInbox().catch(() => undefined);
+  logNotificationTrace(trace, 'genericPushNotificationRequested');
+  const notificationType = trace.notificationType;
+  let body: string | undefined;
+  if (trace.recipientUserId && trace.recipientUserId === notificationContext?.userId
+    && notificationType && checkIfControlPush(notificationType)
+    && (notificationType !== 'SESSION_REVOKE' || trace.isPayloadAuthenticated)) {
+    body = notificationContext.controlMessages?.[notificationType];
+    if (!body && notificationType === 'MESSAGE_DELETED') {
+      body = notificationContext.deletedMessageText;
+    }
+  }
+  await publishNotification(APP_NAME, {
+    tag: APP_NOTIFICATION_TAG,
+    body,
+    icon: DEFAULT_NOTIFICATION_ICON,
+    badge: DEFAULT_NOTIFICATION_ICON,
+    silent: true,
+    data: {
+      userId: inboxUserId,
+      inboxUpdatedAt: Date.now(),
+      entries: Array.from(inboxByChatKey.values()),
+    },
+  }, trace);
+}
+
+async function showUnscopedPushNotification(trace: NotificationTrace) {
+  const context = await getPushNotificationContext();
+  if (context?.hasWebNotifications === false) {
+    logNotificationTrace(trace, 'skipNotificationsDisabled');
+    return;
+  }
+  logNotificationTrace(trace, 'unscopedPushNotificationRequested');
+  await publishNotification(APP_NAME, {
+    tag: UNSCOPED_NOTIFICATION_TAG,
+    body: context?.messageText,
+    icon: DEFAULT_NOTIFICATION_ICON,
+    badge: DEFAULT_NOTIFICATION_ICON,
+    silent: true,
+  }, trace);
 }
 
 function logNotificationTrace(trace: NotificationTrace | undefined, status: string, err?: unknown) {
@@ -810,6 +1409,10 @@ function logNotificationTrace(trace: NotificationTrace | undefined, status: stri
     hasNotificationRequestResolved: trace.hasNotificationRequestResolved,
     skipReason: trace.skipReason,
     notificationType: trace.notificationType,
+    hasPayloadUserId: trace.hasPayloadUserId,
+    hasAccountContext: trace.hasAccountContext,
+    isPayloadAuthenticated: trace.isPayloadAuthenticated,
+    hasRegisteredSecretOwner: Boolean(trace.authenticatedUserId),
   };
   recordPushDiagnosticStep(trace.diagnostic, status, details);
   if (DEBUG) {

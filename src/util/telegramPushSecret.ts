@@ -6,6 +6,9 @@ import {
 } from './encoding/buffer';
 
 const SECRET_KEY = '/push-secret';
+const REGISTERED_SECRET_KEY = '/registered-push-secret';
+const REGISTERED_USER_HEADER = 'X-Telegram-Push-User-Id';
+const USER_ID_RE = /^[1-9]\d*$/;
 const SECRET_BYTES = 256;
 const AUTH_KEY_ID_BYTES = 8;
 const MSG_KEY_BYTES = 16;
@@ -19,13 +22,19 @@ const MSG_KEY_LARGE_OFFSET = 88;
 const MSG_KEY_LARGE_SLICE_BYTES = 32;
 
 // The page and the service worker share Cache Storage, so the worker can decrypt pushes while the app is closed
-export async function getOrCreatePushSecret() {
-  const savedSecret = await loadPushSecret();
-  if (savedSecret) return savedSecret;
+export async function getOrCreatePushSecret(userId: string) {
+  if (!USER_ID_RE.test(userId)) throw new Error('Invalid push secret account');
+
+  const secretKey = `${SECRET_KEY}/${userId}`;
+  const cache = await caches.open(PUSH_SECRET_CACHE_NAME);
+  const response = await cache.match(secretKey);
+  if (response) {
+    const savedSecret = await readPushSecret(response);
+    if (savedSecret) return savedSecret;
+  }
 
   const secret = crypto.getRandomValues(new Uint8Array(SECRET_BYTES));
-  const cache = await caches.open(PUSH_SECRET_CACHE_NAME);
-  await cache.put(SECRET_KEY, new Response(secret));
+  await cache.put(secretKey, new Response(secret));
   return secret;
 }
 
@@ -34,6 +43,38 @@ export async function loadPushSecret() {
   const response = await cache.match(SECRET_KEY);
   if (!response) return undefined;
 
+  return readPushSecret(response);
+}
+
+export async function saveRegisteredPushSecret(userId: string, secret: Uint8Array<ArrayBuffer>) {
+  if (!USER_ID_RE.test(userId) || secret.length !== SECRET_BYTES) {
+    throw new Error('Invalid registered push secret');
+  }
+
+  const cache = await caches.open(PUSH_SECRET_CACHE_NAME);
+  await cache.put(REGISTERED_SECRET_KEY, new Response(secret, {
+    headers: { [REGISTERED_USER_HEADER]: userId },
+  }));
+}
+
+export async function loadRegisteredPushSecret() {
+  const cache = await caches.open(PUSH_SECRET_CACHE_NAME);
+  const response = await cache.match(REGISTERED_SECRET_KEY);
+  if (!response) return undefined;
+
+  const userId = response.headers.get(REGISTERED_USER_HEADER);
+  if (!userId || !USER_ID_RE.test(userId)) return undefined;
+
+  const secret = await readPushSecret(response);
+  return secret ? { secret, userId } : undefined;
+}
+
+export async function clearRegisteredPushSecret() {
+  const cache = await caches.open(PUSH_SECRET_CACHE_NAME);
+  return cache.delete(REGISTERED_SECRET_KEY);
+}
+
+async function readPushSecret(response: Response) {
   const secret = new Uint8Array(await response.arrayBuffer());
   return secret.length === SECRET_BYTES ? secret : undefined;
 }

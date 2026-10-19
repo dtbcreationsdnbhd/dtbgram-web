@@ -1,7 +1,7 @@
 import {
   memo, useCallback, useEffect, useState,
 } from '../../../lib/teact/teact';
-import { getActions, withGlobal } from '../../../global';
+import { getActions, getPromiseActions, withGlobal } from '../../../global';
 
 import type { ApiNotifyPeerType, ApiPeerNotifySettings } from '../../../api/types';
 
@@ -10,8 +10,9 @@ import { copyTextToClipboardFromPromise } from '../../../util/clipboard';
 import download from '../../../util/download';
 import {
   checkIfNotificationsSupported,
-  checkIfOfflinePushFailed,
+  checkIfPushSupported,
   playNotifySound,
+  subscribe,
 } from '../../../util/notifications';
 import {
   clearPushDiagnostics,
@@ -87,7 +88,7 @@ const SettingsNotifications = ({
   const runDebounced = useRunDebounced(500, true);
 
   const areNotificationsSupported = checkIfNotificationsSupported();
-  const areOfflineNotificationsSupported = areNotificationsSupported && !checkIfOfflinePushFailed();
+  const areOfflineNotificationsSupported = areNotificationsSupported && checkIfPushSupported();
 
   const areChannelsMuted = Boolean(notifyDefaults?.channels?.mutedUntil);
   const areGroupsMuted = Boolean(notifyDefaults?.groups?.mutedUntil);
@@ -108,13 +109,14 @@ const SettingsNotifications = ({
     });
   }, [notifyDefaults, updateNotificationSettings]);
 
-  const handleWebNotificationsChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleWebNotificationsChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const isEnabled = e.target.checked;
-    updateWebNotificationSettings({
+    await getPromiseActions().updateWebNotificationSettings({
       hasWebNotifications: isEnabled,
       hasPushNotifications: isEnabled ? undefined : false,
     });
-  }, [updateWebNotificationSettings]);
+    if (isEnabled && hasPushNotifications) void subscribe();
+  }, [hasPushNotifications]);
 
   const handlePushNotificationsChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     updateWebNotificationSettings({

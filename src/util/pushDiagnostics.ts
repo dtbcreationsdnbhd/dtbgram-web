@@ -9,6 +9,7 @@ export type PushDiagnosticDetails = {
   workerState?: ServiceWorkerState;
   errorName?: string;
   errorMessage?: string;
+  httpStatus?: number;
   isAppVisible?: boolean;
   hasSubscription?: boolean;
   subscriptionExpiresAt?: number;
@@ -22,6 +23,10 @@ export type PushDiagnosticDetails = {
   hasNotificationRequestResolved?: boolean;
   skipReason?: string;
   notificationType?: string;
+  hasPayloadUserId?: boolean;
+  hasAccountContext?: boolean;
+  isPayloadAuthenticated?: boolean;
+  hasRegisteredSecretOwner?: boolean;
 };
 
 export type PushDiagnosticTrace = {
@@ -112,6 +117,7 @@ export function recordPushDiagnosticStep(
     workerState: details?.workerState,
     errorName: details?.errorName?.slice(0, MAX_TEXT_LENGTH),
     errorMessage: details?.errorMessage?.slice(0, MAX_TEXT_LENGTH),
+    httpStatus: details?.httpStatus,
     isAppVisible: details?.isAppVisible,
     hasSubscription: details?.hasSubscription,
     subscriptionExpiresAt: details?.subscriptionExpiresAt,
@@ -125,6 +131,10 @@ export function recordPushDiagnosticStep(
     hasNotificationRequestResolved: details?.hasNotificationRequestResolved,
     skipReason: details?.skipReason?.slice(0, MAX_TEXT_LENGTH),
     notificationType: details?.notificationType?.slice(0, MAX_TEXT_LENGTH),
+    hasPayloadUserId: details?.hasPayloadUserId,
+    hasAccountContext: details?.hasAccountContext,
+    isPayloadAuthenticated: details?.isPayloadAuthenticated,
+    hasRegisteredSecretOwner: details?.hasRegisteredSecretOwner,
   };
 
   trace.pendingWrite = trace.pendingWrite.then(async () => {

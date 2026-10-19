@@ -2577,6 +2577,14 @@ export interface LangPair {
   'PushLogDescription': undefined;
   'PushLogFailed': undefined;
   'PushLogCleared': undefined;
+  'PushMessageDeleted': undefined;
+  'PushMessagesRead': undefined;
+  'PushReactionsRead': undefined;
+  'PushStoriesRead': undefined;
+  'PushStoryDeleted': undefined;
+  'PushMutedMessage': undefined;
+  'PushLiveLocationUpdate': undefined;
+  'PushSessionCheck': undefined;
 }
 
 export interface LangPairWithVariables<V = LangVariable> {

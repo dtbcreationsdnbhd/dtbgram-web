@@ -1,15 +1,23 @@
-import { getActions } from '../global';
+import { addCallback } from '../lib/teact/teactn';
+import { getActions, getGlobal } from '../global';
+
+import type { GlobalState } from '../global/types';
 
 import { DEBUG, DEBUG_MORE, IS_TEST } from '../config';
+import { callApi } from '../api/gramjs';
 // eslint-disable-next-line import-x/default
 import serviceWorkerUrl from '../serviceWorker/service.worker.ts?worker&url';
 import { IS_ANDROID, IS_IOS, IS_SERVICE_WORKER_SUPPORTED } from './browser/windowEnvironment';
 import { formatShareText } from './deeplink';
 import { validateFiles } from './files';
-import { notifyClientReady, playNotifySoundDebounced } from './notifications';
+import { addLocalizationCallback } from './localization';
+import {
+  checkIfOfflinePushFailed, notifyClientReady, playNotifySoundDebounced, refreshPushNotificationContext, subscribe,
+} from './notifications';
 import {
   capturePushDiagnosticSnapshot, createPushDiagnosticTrace, flushPushDiagnosticTrace, recordPushDiagnosticStep,
 } from './pushDiagnostics';
+import { throttle } from './schedulers';
 
 type WorkerAction = {
   type: string;
@@ -20,9 +28,30 @@ const IGNORE_WORKER_PATH = '/k/';
 const SW_CLAIM_RELOAD_KEY = 'tt-sw-claim-reload';
 const CONTROLLER_WAIT_MS = 4000;
 const PUSH_DIAGNOSTIC_READ_TIMEOUT_MS = 2000;
+const PUSH_CHAT_CONTEXT_REFRESH_MS = 200;
 const SERVICE_WORKER_OPTIONS: RegistrationOptions = import.meta.env.DEV
   ? { scope: './', type: 'module' }
   : { type: 'module' };
+const refreshPushChatContextThrottled = throttle(refreshPushNotificationContext, PUSH_CHAT_CONTEXT_REFRESH_MS, false);
+
+let previousGlobal: GlobalState | undefined;
+
+function handlePushContextChange(global: GlobalState) {
+  const oldGlobal = previousGlobal;
+  previousGlobal = global;
+  if (!global.isInited) return;
+  if (oldGlobal?.isInited && oldGlobal.currentUserId === global.currentUserId
+    && oldGlobal.passcode.isScreenLocked === global.passcode.isScreenLocked
+    && oldGlobal.passcode.hasPasscode === global.passcode.hasPasscode
+    && oldGlobal.settings.byKey.hasWebNotifications === global.settings.byKey.hasWebNotifications
+    && oldGlobal.settings.notifyDefaults === global.settings.notifyDefaults
+    && oldGlobal.chats.notifyExceptionById === global.chats.notifyExceptionById) {
+    if (oldGlobal.chats.byId !== global.chats.byId) refreshPushChatContextThrottled();
+    return;
+  }
+
+  void refreshPushNotificationContext();
+}
 
 function handleWorkerMessage(e: MessageEvent) {
   const action: WorkerAction = e.data;
@@ -33,9 +62,26 @@ function handleWorkerMessage(e: MessageEvent) {
   if (!action.type) return;
   const dispatch = getActions();
   const payload = action.payload;
+  if (payload?.userId && payload.userId !== getGlobal().currentUserId) return;
   switch (action.type) {
     case 'focusMessage':
-      dispatch.focusMessage?.(payload as any);
+      if (payload.messageId) {
+        dispatch.focusMessage?.(payload as any);
+      } else if (payload.chatId) {
+        dispatch.openChat({ id: payload.chatId });
+      }
+      break;
+    case 'focusStory':
+      dispatch.openStoryViewer({ peerId: payload.chatId, storyId: payload.storyId });
+      break;
+    case 'pushStateUpdate':
+      if (payload.notificationType === 'SESSION_REVOKE') {
+        void callApi('fetchCurrentUser');
+      } else if (payload.notificationType === 'DC_UPDATE') {
+        dispatch.loadConfig();
+      } else if (payload.notificationType === 'AUTH_UNKNOWN' || payload.notificationType === 'AUTH_REGION') {
+        dispatch.loadAuthorizations();
+      }
       break;
     case 'playNotificationSound':
       playNotifySoundDebounced(action.payload.id);
@@ -49,9 +95,10 @@ function handleWorkerMessage(e: MessageEvent) {
   }
 }
 
-function subscribeToWorker() {
+async function subscribeToWorker() {
   navigator.serviceWorker.removeEventListener('message', handleWorkerMessage);
   navigator.serviceWorker.addEventListener('message', handleWorkerMessage);
+  await refreshPushNotificationContext();
   // Notify web worker that client is ready to receive messages
   notifyClientReady();
 }
@@ -110,7 +157,7 @@ async function registerServiceWorker() {
         // eslint-disable-next-line no-console
         console.log('[SW] ServiceWorker ready');
       }
-      subscribeToWorker();
+      await subscribeToWorker();
       return;
     }
 
@@ -137,6 +184,8 @@ async function registerServiceWorker() {
 }
 
 if (IS_SERVICE_WORKER_SUPPORTED) {
+  addCallback(handlePushContextChange);
+  addLocalizationCallback(refreshPushNotificationContext);
   if (document.readyState === 'loading') {
     window.addEventListener('load', registerServiceWorker);
   } else {
@@ -148,10 +197,12 @@ if (IS_SERVICE_WORKER_SUPPORTED) {
     void capturePushDiagnosticSnapshot('pageFocus', registration, {
       isAppVisible: document.visibilityState === 'visible',
     });
-    subscribeToWorker();
+    await subscribeToWorker();
+    if (checkIfOfflinePushFailed()) void subscribe();
   });
 
-  document.addEventListener('visibilitychange', () => {
+  document.addEventListener('visibilitychange', async () => {
+    await refreshPushNotificationContext();
     void recordPagePushState('pageVisibility');
   });
 }
