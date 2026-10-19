@@ -13,7 +13,7 @@ import {
   values as getValues,
 } from 'idb-keyval';
 
-class IdbStore {
+export class IdbStore {
   public store: ReturnType<typeof createStore>;
 
   constructor(name: string) {

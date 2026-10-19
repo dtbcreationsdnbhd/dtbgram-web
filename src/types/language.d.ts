@@ -2569,6 +2569,14 @@ export interface LangPair {
   'ChatClearHistoryConfirm': undefined;
   'HeaderMenuViewChannelInfo': undefined;
   'JustChat': undefined;
+  'PushLogTitle': undefined;
+  'PushLogRecord': undefined;
+  'PushLogCopy': undefined;
+  'PushLogDownload': undefined;
+  'PushLogClear': undefined;
+  'PushLogDescription': undefined;
+  'PushLogFailed': undefined;
+  'PushLogCleared': undefined;
 }
 
 export interface LangPairWithVariables<V = LangVariable> {

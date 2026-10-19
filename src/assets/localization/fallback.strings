@@ -3427,3 +3427,11 @@
 "ChatClearHistoryConfirm" = "Delete all messages in this chat? The chat will stay in your chat list.";
 "HeaderMenuViewChannelInfo" = "View channel info";
 "JustChat" = "JustChat";
+"PushLogTitle" = "Notification diagnostics";
+"PushLogRecord" = "Record notification diagnostics";
+"PushLogCopy" = "Copy notification log";
+"PushLogDownload" = "Download notification log";
+"PushLogClear" = "Clear notification log";
+"PushLogDescription" = "Records notification activity when the app is open or receives a background push. The latest 1,000 events are kept on this device for up to 7 days, without message contents. Export the log when notifications stop working.";
+"PushLogFailed" = "Couldn't complete the notification diagnostics action. Please try again.";
+"PushLogCleared" = "Notification log cleared.";

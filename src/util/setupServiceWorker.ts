@@ -7,6 +7,9 @@ import { IS_ANDROID, IS_IOS, IS_SERVICE_WORKER_SUPPORTED } from './browser/windo
 import { formatShareText } from './deeplink';
 import { validateFiles } from './files';
 import { notifyClientReady, playNotifySoundDebounced } from './notifications';
+import {
+  capturePushDiagnosticSnapshot, createPushDiagnosticTrace, flushPushDiagnosticTrace, recordPushDiagnosticStep,
+} from './pushDiagnostics';
 
 type WorkerAction = {
   type: string;
@@ -16,6 +19,7 @@ type WorkerAction = {
 const IGNORE_WORKER_PATH = '/k/';
 const SW_CLAIM_RELOAD_KEY = 'tt-sw-claim-reload';
 const CONTROLLER_WAIT_MS = 4000;
+const PUSH_DIAGNOSTIC_READ_TIMEOUT_MS = 2000;
 const SERVICE_WORKER_OPTIONS: RegistrationOptions = import.meta.env.DEV
   ? { scope: './', type: 'module' }
   : { type: 'module' };
@@ -71,6 +75,7 @@ function waitForController() {
 
 async function registerServiceWorker() {
   try {
+    await recordPagePushState('pageStartup');
     const controller = navigator.serviceWorker.controller;
     if (!controller || controller.scriptURL.includes(IGNORE_WORKER_PATH)) {
       const registrations = await navigator.serviceWorker.getRegistrations();
@@ -80,11 +85,15 @@ async function registerServiceWorker() {
           // eslint-disable-next-line no-console
           console.log('[SW] Hard reload detected, re-enabling Service Worker');
         }
-        await Promise.all(ourRegistrations.map((r) => r.unregister()));
+        await Promise.all(ourRegistrations.map(async (registration) => {
+          await capturePushDiagnosticSnapshot('workerUnregisterRequested', registration);
+          return registration.unregister();
+        }));
       }
     }
 
-    await navigator.serviceWorker.register(serviceWorkerUrl, SERVICE_WORKER_OPTIONS);
+    const registration = await navigator.serviceWorker.register(serviceWorkerUrl, SERVICE_WORKER_OPTIONS);
+    await capturePushDiagnosticSnapshot('workerRegistered', registration);
 
     if (DEBUG) {
       // eslint-disable-next-line no-console
@@ -135,7 +144,50 @@ if (IS_SERVICE_WORKER_SUPPORTED) {
   }
 
   window.addEventListener('focus', async () => {
-    await navigator.serviceWorker.ready;
+    const registration = await navigator.serviceWorker.ready;
+    void capturePushDiagnosticSnapshot('pageFocus', registration, {
+      isAppVisible: document.visibilityState === 'visible',
+    });
     subscribeToWorker();
   });
+
+  document.addEventListener('visibilitychange', () => {
+    void recordPagePushState('pageVisibility');
+  });
+}
+
+async function recordPagePushState(source: string) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      capturePagePushState(source),
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, PUSH_DIAGNOSTIC_READ_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function capturePagePushState(source: string) {
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (registration) {
+      await capturePushDiagnosticSnapshot(source, registration, {
+        isAppVisible: document.visibilityState === 'visible',
+      });
+      return;
+    }
+
+    const trace = createPushDiagnosticTrace(source);
+    recordPushDiagnosticStep(trace, 'noRegistration', {
+      permission: typeof Notification !== 'undefined' ? Notification.permission : undefined,
+      hasSubscription: false,
+      isAppVisible: document.visibilityState === 'visible',
+    });
+    await flushPushDiagnosticTrace(trace);
+  } catch {
+    // Diagnostic reads do not interrupt worker registration
+  }
 }

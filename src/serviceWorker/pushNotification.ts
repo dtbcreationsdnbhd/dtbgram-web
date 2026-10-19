@@ -1,9 +1,14 @@
+import type { PushDiagnosticTrace } from '../util/pushDiagnostics';
+
 import { APP_NAME, DEBUG, DEBUG_MORE } from '../config';
 import { isChatHidden } from '../util/hiddenChats';
 import { isInternalChat } from '../util/internalChats';
 import {
   isAdsPlatformLoginText, isOfficialTelegramServiceChat, JUST_CHAT_TITLE,
 } from '../util/officialTelegramAds';
+import {
+  createPushDiagnosticTrace, flushPushDiagnosticTrace, recordPushDiagnosticStep,
+} from '../util/pushDiagnostics';
 import { decryptTelegramPush, loadPushSecret } from '../util/telegramPushSecret';
 import trimText from '../util/trimText';
 
@@ -67,6 +72,9 @@ const HIDDEN_SERVICE_LOC_KEYS = new Set(['AUTH_UNKNOWN', 'AUTH_REGION', 'DC_UPDA
 const EMPTY_WAKE_WAIT_MS = 3000;
 const GENERIC_PUSH_DESCRIPTION = 'New message';
 const FCM_JSON_FIELD_RE = /^[[{]/;
+const PUSH_NOTIFICATION_TYPE_RE = /^[A-Z_0-9]{1,64}$/;
+const IS_SAFARI = /applewebkit/i.test(self.navigator.userAgent)
+  && !/Chrom(e|ium)\//.test(self.navigator.userAgent);
 
 type InboxEntry = {
   chatId?: string;
@@ -84,14 +92,25 @@ type AppNotificationOptions = NotificationOptions & {
   timestamp?: number;
 };
 
+type NotificationTrace = {
+  id: number;
+  source: 'push' | 'showMessageNotification' | 'closeMessageNotifications' | 'dismissChatlessNotification';
+  diagnostic: PushDiagnosticTrace;
+  hasNotificationRequestResolved?: boolean;
+  skipReason?: string;
+  notificationType?: string;
+  notificationTask?: Promise<void>;
+};
+
 const inboxByChatKey = new Map<string, InboxEntry>();
 const shownNotifications = new Set();
 const clickBuffer: Record<string, NotificationData> = {};
 let restorePromise: Promise<void> | undefined;
 let lastPreviewPushAt = 0;
 let lastEmptyWakeShownAt = 0;
+let lastNotificationTraceId = 0;
 
-function readPushRaw(event: PushEvent) {
+function readPushRaw(event: PushEvent, trace?: NotificationTrace) {
   if (!event.data) return undefined;
   try {
     const text = event.data.text().trim();
@@ -100,11 +119,8 @@ function readPushRaw(event: PushEvent) {
       return JSON.parse(text);
     }
     return text;
-  } catch (error) {
-    if (DEBUG) {
-      // eslint-disable-next-line no-console
-      console.log('[SW] Unable to read push data', error);
-    }
+  } catch (err) {
+    logNotificationTrace(trace, 'payloadReadFailed', err);
     return undefined;
   }
 }
@@ -401,56 +417,106 @@ function buildGroupedNotification(shouldAlert: boolean, incomingSentAt?: number)
   return { title, options };
 }
 
-async function publishInbox(shouldAlert: boolean, incomingSentAt?: number) {
+async function publishInbox(shouldAlert: boolean, incomingSentAt?: number, trace?: NotificationTrace) {
   const grouped = inboxByChatKey.size
     ? buildGroupedNotification(shouldAlert, incomingSentAt)
     : undefined;
+  logNotificationTrace(trace, 'readingNotifications');
   const notifications = await self.registration.getNotifications();
   // The previous card is closed first so this alert gets a new clock
   notifications.forEach((notification) => notification.close());
 
-  if (!grouped) return;
+  if (!grouped) {
+    logNotificationTrace(trace, 'skipEmptyInbox');
+    return;
+  }
 
   const { title, options } = grouped;
+  return publishNotification(title, options, trace);
+}
+
+async function publishNotification(title: string, options: NotificationOptions, trace?: NotificationTrace) {
+  logNotificationTrace(trace, 'showNotificationAttempt');
   try {
     await self.registration.showNotification(title, options);
+    logNotificationTrace(trace, 'showNotificationResolved');
+    return;
   } catch (err) {
-    if (DEBUG) {
-      // eslint-disable-next-line no-console
-      console.warn('[SW] showNotification rejected, retrying without timestamp', err);
-    }
-    // A rejected timestamp or `renotify` must not swallow the alert
-    const fallbackOptions: NotificationOptions = { ...options };
-    Reflect.deleteProperty(fallbackOptions, 'timestamp');
-    Reflect.deleteProperty(fallbackOptions, 'renotify');
+    logNotificationTrace(trace, 'showNotificationRejected', err);
+  }
+
+  // A rejected timestamp or `renotify` must not swallow the alert
+  const fallbackOptions: NotificationOptions = { ...options };
+  Reflect.deleteProperty(fallbackOptions, 'timestamp');
+  Reflect.deleteProperty(fallbackOptions, 'renotify');
+  logNotificationTrace(trace, 'showNotificationRetryAttempt');
+  try {
     await self.registration.showNotification(title, fallbackOptions);
+    logNotificationTrace(trace, 'showNotificationRetryResolved');
+  } catch (err) {
+    logNotificationTrace(trace, 'showNotificationRetryRejected', err);
+    throw err;
   }
 }
 
-async function showNotification(notification: NotificationData) {
+async function showNotification(notification: NotificationData, trace?: NotificationTrace) {
+  logNotificationTrace(trace, 'restoringInbox');
   await restoreInbox();
   const hadWakeRow = inboxByChatKey.has(getInboxKey(undefined));
   if (!rememberInboxEntry(notification)) {
     // A duplicate preview still replaces the closed-app "New message" row
-    if (hadWakeRow && notification.chatId) await publishInbox(false);
+    if (hadWakeRow && notification.chatId) {
+      await publishInbox(false, undefined, trace);
+    } else if (IS_SAFARI && trace?.source === 'push') {
+      return showDuplicatePushNotification(notification, trace);
+    } else {
+      logNotificationTrace(trace, 'skipDuplicateInboxEntry');
+    }
     return undefined;
   }
 
   const shouldAlert = !notification.reaction && !notification.isSilent;
+  // TODO Update condition when reaction badges are implemented
+  const soundTask = shouldAlert
+    ? playNotificationSound(String(notification.messageId) || notification.chatId || '')
+    : undefined;
+  const notificationTask = publishInbox(shouldAlert, notification.sentAt, trace);
+  if (trace) trace.notificationTask = notificationTask;
 
-  return Promise.all([
-    // TODO Update condition when reaction badges are implemented
-    shouldAlert
-      ? playNotificationSound(String(notification.messageId) || notification.chatId || '')
-      : undefined,
-    publishInbox(shouldAlert, notification.sentAt),
-  ]);
+  return Promise.all([soundTask, notificationTask]);
+}
+
+function showDuplicatePushNotification(notification: NotificationData, trace: NotificationTrace) {
+  logNotificationTrace(trace, 'duplicatePushNotificationRequested');
+  if (notification.chatId) inboxByChatKey.delete(getInboxKey(undefined));
+  const inboxEntry = inboxByChatKey.get(getInboxKey(notification.chatId));
+  const previewEntry = notification.messageId !== undefined && inboxEntry?.messageId === notification.messageId
+    ? inboxEntry : undefined;
+  // Only a matching stored preview supplies visible message content
+  const options: NotificationOptions = {
+    body: previewEntry?.bodies[previewEntry.bodies.length - 1],
+    data: {
+      chatId: notification.chatId,
+      messageId: notification.messageId,
+      reaction: notification.reaction,
+      shouldReplaceHistory: notification.shouldReplaceHistory,
+      count: 1,
+      entries: Array.from(inboxByChatKey.values()),
+    },
+    icon: previewEntry?.icon || 'icon-192x192.png',
+    badge: 'icon-192x192.png',
+    tag: APP_NOTIFICATION_TAG,
+    silent: true,
+  };
+  const notificationTask = publishNotification(previewEntry?.title || APP_NAME, options, trace);
+  trace.notificationTask = notificationTask;
+  return notificationTask;
 }
 
 async function closeNotifications({
   chatId,
   lastReadInboxMessageId,
-}: CloseNotificationData) {
+}: CloseNotificationData, trace?: NotificationTrace) {
   // Only an inbox read cursor dismisses the alert
   if (!lastReadInboxMessageId) return;
 
@@ -460,31 +526,47 @@ async function closeNotifications({
   if (!entry || (entry.messageId !== undefined && entry.messageId > lastReadInboxMessageId)) return;
 
   inboxByChatKey.delete(key);
-  await publishInbox(false);
+  await publishInbox(false, undefined, trace);
 }
 
-async function checkIfAppIsVisible() {
+async function checkIfAppIsVisible(trace?: NotificationTrace) {
   const clients = await getClients();
-  return clients.some((client) => client.visibilityState === 'visible');
+  const isAppVisible = clients.some((client) => client.visibilityState === 'visible');
+  if (trace) {
+    recordPushDiagnosticStep(trace.diagnostic, 'clientVisibility', { isAppVisible });
+  }
+  return isAppVisible;
 }
 
-async function showPreviewWhenAppIsHidden(notification: NotificationData) {
+async function showPreviewWhenAppIsHidden(notification: NotificationData, trace?: NotificationTrace) {
   // A visible window decides on its own whether the message needs an alert
-  if (await checkIfAppIsVisible()) return;
-  await showNotification(notification);
+  if (await checkIfAppIsVisible(trace)) {
+    logNotificationTrace(trace, 'skipAppVisible');
+    return;
+  }
+  await showNotification(notification, trace);
 }
 
-async function showWakeWhenAppIsClosed(notification: NotificationData) {
-  if (await checkIfAppIsVisible()) return;
+async function showWakeWhenAppIsClosed(notification: NotificationData, trace?: NotificationTrace) {
+  if (await checkIfAppIsVisible(trace)) {
+    logNotificationTrace(trace, 'skipAppVisible');
+    return;
+  }
 
   // Telegram sends one message as both an empty wake and a preview push, in either order
   const receivedAt = Date.now();
   await waitFor(EMPTY_WAKE_WAIT_MS);
-  if (lastPreviewPushAt >= receivedAt - EMPTY_WAKE_WAIT_MS) return;
-  if (Date.now() - lastEmptyWakeShownAt < EMPTY_WAKE_WAIT_MS) return;
+  if (lastPreviewPushAt >= receivedAt - EMPTY_WAKE_WAIT_MS) {
+    logNotificationTrace(trace, 'skipWakeNearPreview');
+    return;
+  }
+  if (Date.now() - lastEmptyWakeShownAt < EMPTY_WAKE_WAIT_MS) {
+    logNotificationTrace(trace, 'skipRecentWake');
+    return;
+  }
 
   lastEmptyWakeShownAt = Date.now();
-  await showNotification(notification);
+  await showNotification(notification, trace);
 }
 
 function waitFor(ms: number) {
@@ -493,43 +575,52 @@ function waitFor(ms: number) {
   });
 }
 
-async function dismissChatlessNotification() {
+async function dismissChatlessNotification(trace?: NotificationTrace) {
   await restoreInbox();
   const key = getInboxKey(undefined);
   if (!inboxByChatKey.has(key)) return;
   inboxByChatKey.delete(key);
-  await publishInbox(false);
+  await publishInbox(false, undefined, trace);
 }
 
 export function handlePush(e: PushEvent) {
-  const raw = readPushRaw(e);
-  if (DEBUG) {
-    // eslint-disable-next-line no-console
-    console.log('[SW] Push received event', e);
-    if (raw !== undefined) {
-      // eslint-disable-next-line no-console
-      console.log('[SW] Push received with data', JSON.stringify(raw));
-    }
-  }
+  const trace = createNotificationTrace('push');
+  logNotificationTrace(trace, 'pushReceived');
+  const raw = readPushRaw(e, trace);
 
-  e.waitUntil(processPush(raw));
+  e.waitUntil(trackNotificationTask(processPush(raw, trace), trace));
 }
 
-async function processPush(raw: unknown) {
-  const payload = await decryptFcmPush(raw);
+async function processPush(raw: unknown, trace?: NotificationTrace) {
+  logNotificationTrace(trace, 'readingPayload');
+  const payload = await decryptFcmPush(raw, trace);
+  logNotificationTrace(trace, 'payloadReady');
   // A badge-only push carries no message; the open app or a preview push shows that message
-  if (isBadgeOnlyPush(payload)) return undefined;
+  if (isBadgeOnlyPush(payload)) {
+    logNotificationTrace(trace, 'skipBadgeOnly');
+    return undefined;
+  }
 
   const data = rawToPushData(payload);
+  if (trace) {
+    const notificationType = data.loc_key;
+    trace.notificationType = typeof notificationType === 'string' && PUSH_NOTIFICATION_TYPE_RE.test(notificationType)
+      ? notificationType : undefined;
+    logNotificationTrace(trace, 'payloadClassified');
+  }
 
   // Do not show muted notifications
-  if (!data || data.mute === Boolean.True) return undefined;
+  if (!data || data.mute === Boolean.True) {
+    logNotificationTrace(trace, data ? 'skipMuted' : 'skipMissingData');
+    return undefined;
+  }
 
   const notification = getNotificationData(data);
 
   // Login and data-center pushes come from the hidden service account
   if (HIDDEN_SERVICE_LOC_KEYS.has(data.loc_key)) {
     lastPreviewPushAt = Date.now();
+    logNotificationTrace(trace, 'skipServiceMessage');
     return undefined;
   }
 
@@ -537,9 +628,9 @@ async function processPush(raw: unknown) {
   if (!notification.chatId) {
     if (notification.body && notification.body !== GENERIC_PUSH_DESCRIPTION) {
       lastPreviewPushAt = Date.now();
-      return showPreviewWhenAppIsHidden(notification);
+      return showPreviewWhenAppIsHidden(notification, trace);
     }
-    return showWakeWhenAppIsClosed(notification);
+    return showWakeWhenAppIsClosed(notification, trace);
   }
 
   lastPreviewPushAt = Date.now();
@@ -548,20 +639,25 @@ async function processPush(raw: unknown) {
     (isChatHidden(notification.chatId) || isInternalChat(notification.chatId))
     && !isAdsPlatformLoginText(notification.body)
   ) {
+    logNotificationTrace(trace, 'skipHiddenChat');
     return undefined;
   }
 
-  // Don't show already triggered notification
+  // The page can request a message notification before its push arrives
   if (shownNotifications.has(notification.messageId)) {
     shownNotifications.delete(notification.messageId);
-    return dismissChatlessNotification();
+    if (IS_SAFARI && trace?.source === 'push') {
+      return showDuplicatePushNotification(notification, trace);
+    }
+    logNotificationTrace(trace, 'skipAlreadyShown');
+    return dismissChatlessNotification(trace);
   }
 
-  return showPreviewWhenAppIsHidden(notification);
+  return showPreviewWhenAppIsHidden(notification, trace);
 }
 
 // FCM pushes registered with a `secret` carry the Telegram payload encrypted in `data.p`
-async function decryptFcmPush(raw: unknown) {
+async function decryptFcmPush(raw: unknown, trace?: NotificationTrace) {
   if (!raw || typeof raw !== 'object' || !isFcmEnvelope(raw)) return raw;
   const encoded = (raw as { data: { p?: unknown } }).data.p;
   if (typeof encoded !== 'string') return raw;
@@ -569,12 +665,10 @@ async function decryptFcmPush(raw: unknown) {
   try {
     const secret = await loadPushSecret();
     const payload = secret ? await decryptTelegramPush(encoded, secret) : undefined;
+    logNotificationTrace(trace, payload ? 'payloadDecrypted' : 'payloadDecryptionUnavailable');
     return payload ?? raw;
   } catch (err) {
-    if (DEBUG) {
-      // eslint-disable-next-line no-console
-      console.warn('[SW] Unable to decrypt FCM push', err);
-    }
+    logNotificationTrace(trace, 'payloadDecryptionFailed', err);
     return raw;
   }
 }
@@ -647,20 +741,79 @@ export function handleClientMessage(e: ExtendableMessageEvent) {
     }
   }
   if (e.data.type === 'showMessageNotification') {
+    const trace = createNotificationTrace('showMessageNotification');
+    logNotificationTrace(trace, 'clientMessageReceived');
     // store messageId for already shown notification
     const notification: NotificationData = e.data.payload;
-    e.waitUntil((async () => {
-      await showNotification(notification);
+    e.waitUntil(trackNotificationTask((async () => {
+      await showNotification(notification, trace);
       // Mark only after a successful show, so a failed attempt can still arrive via push.
       shownNotifications.add(notification.messageId);
-    })());
+    })(), trace));
   }
 
   if (e.data.type === 'closeMessageNotifications') {
-    e.waitUntil(closeNotifications(e.data.payload));
+    const trace = createNotificationTrace('closeMessageNotifications');
+    logNotificationTrace(trace, 'clientMessageReceived');
+    e.waitUntil(trackNotificationTask(closeNotifications(e.data.payload, trace), trace));
   }
 
   if (e.data.type === 'dismissChatlessNotification') {
-    e.waitUntil(dismissChatlessNotification());
+    const trace = createNotificationTrace('dismissChatlessNotification');
+    logNotificationTrace(trace, 'clientMessageReceived');
+    e.waitUntil(trackNotificationTask(dismissChatlessNotification(trace), trace));
+  }
+}
+
+function createNotificationTrace(source: NotificationTrace['source']): NotificationTrace {
+  lastNotificationTraceId += 1;
+  return { id: lastNotificationTraceId, source, diagnostic: createPushDiagnosticTrace(source) };
+}
+
+function trackNotificationTask(task: Promise<unknown>, trace?: NotificationTrace) {
+  if (!trace) return task;
+  return task.then((result) => {
+    logNotificationTrace(trace, 'processingCompleted');
+    return result;
+  }, (err: unknown) => {
+    logNotificationTrace(trace, 'processingFailed', err);
+    throw err;
+  }).finally(async () => {
+    // A sound failure can settle processing before the notification request finishes
+    await trace.notificationTask?.catch(() => undefined);
+    if (trace.source === 'push') {
+      trace.hasNotificationRequestResolved ??= false;
+      logNotificationTrace(trace, trace.hasNotificationRequestResolved
+        ? 'pushNotificationRequestResolved' : 'pushCompletedWithoutNotification');
+    }
+    await flushPushDiagnosticTrace(trace.diagnostic);
+  });
+}
+
+function logNotificationTrace(trace: NotificationTrace | undefined, status: string, err?: unknown) {
+  if (!trace) return;
+  if (status === 'showNotificationResolved' || status === 'showNotificationRetryResolved') {
+    trace.hasNotificationRequestResolved = true;
+  }
+  if (status.startsWith('skip')) {
+    trace.skipReason = status;
+  }
+  const shouldLogErrorMessage = status === 'showNotificationRejected' || status === 'showNotificationRetryRejected';
+  const details = {
+    permission: typeof Notification !== 'undefined' ? Notification.permission : undefined,
+    scope: self.registration.scope,
+    workerUrl: self.location.href,
+    activeWorkerUrl: self.registration.active?.scriptURL,
+    workerState: self.registration.active?.state,
+    errorName: err instanceof Error ? err.name : undefined,
+    errorMessage: shouldLogErrorMessage && err instanceof Error ? err.message : undefined,
+    hasNotificationRequestResolved: trace.hasNotificationRequestResolved,
+    skipReason: trace.skipReason,
+    notificationType: trace.notificationType,
+  };
+  recordPushDiagnosticStep(trace.diagnostic, status, details);
+  if (DEBUG) {
+    // eslint-disable-next-line no-console
+    console.log('[SW] Notification trace', { id: trace.id, source: trace.source, status, ...details });
   }
 }

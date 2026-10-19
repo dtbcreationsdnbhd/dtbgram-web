@@ -5,6 +5,7 @@ import type {
   ApiPhoneCall, ApiUser,
 } from '../api/types';
 import type { GlobalState } from '../global/types';
+import type { PushDiagnosticTrace } from './pushDiagnostics';
 import { ApiMediaFormat } from '../api/types';
 
 import {
@@ -50,6 +51,11 @@ import {
   getAppIconUrl, isAdsPlatformLoginMessage, isOfficialTelegramServiceChat,
 } from './officialTelegramAds';
 import { oldTranslate } from './oldLangProvider';
+import {
+  createPushDiagnosticTrace,
+  flushPushDiagnosticTrace,
+  recordPushDiagnosticStep,
+} from './pushDiagnostics';
 import { debounce } from './schedulers';
 import { getServerTime } from './serverTime';
 import { getOrCreatePushSecret } from './telegramPushSecret';
@@ -185,9 +191,14 @@ export async function requestPermission() {
   return permission === 'granted';
 }
 
-async function unsubscribeFromPush(subscription: PushSubscription | null) {
+async function unsubscribeFromPush(subscription: PushSubscription | null, trace: PushDiagnosticTrace) {
   const { deleteDeviceToken } = getActions();
   const { wakeUrl, deviceToken, fcmToken } = getGlobal().push || {};
+  recordPushDiagnosticStep(trace, 'unsubscriptionStarted', {
+    hasSubscription: Boolean(subscription),
+    hasSavedDeviceToken: Boolean(deviceToken),
+    hasFcmToken: Boolean(fcmToken),
+  });
   if (wakeUrl) {
     await unregisterTelegramPush(wakeUrl, deviceToken);
   }
@@ -196,8 +207,10 @@ async function unsubscribeFromPush(subscription: PushSubscription | null) {
   }
   if (subscription) {
     try {
-      await subscription.unsubscribe();
+      const isUnsubscribed = await subscription.unsubscribe();
+      recordPushDiagnosticStep(trace, isUnsubscribed ? 'browserUnsubscribed' : 'browserUnsubscribeReturnedFalse');
     } catch (error) {
+      recordPushRegistrationFailure(trace, 'browserUnsubscriptionFailed', error);
       if (DEBUG) {
         // eslint-disable-next-line no-console
         console.log('[PUSH] Unable to unsubscribe from push.', error);
@@ -205,13 +218,35 @@ async function unsubscribeFromPush(subscription: PushSubscription | null) {
     }
   }
   deleteDeviceToken();
+  recordPushDiagnosticStep(trace, 'savedDeviceTokenDeleted');
 }
 
 export async function unsubscribe() {
-  if (!checkIfPushSupported()) return;
-  const serviceWorkerRegistration = await navigator.serviceWorker.ready;
-  const subscription = await serviceWorkerRegistration.pushManager.getSubscription();
-  await unsubscribeFromPush(subscription);
+  const trace = createPushDiagnosticTrace('unsubscribe');
+  recordPushDiagnosticStep(trace, 'unsubscribeRequested');
+  try {
+    if (!checkIfPushSupported()) {
+      recordPushDiagnosticStep(trace, 'pushUnsupported');
+      return;
+    }
+    const serviceWorkerRegistration = await navigator.serviceWorker.ready;
+    const subscription = await serviceWorkerRegistration.pushManager.getSubscription();
+    recordPushDiagnosticStep(trace, 'subscriptionChecked', {
+      permission: Notification.permission,
+      scope: serviceWorkerRegistration.scope,
+      activeWorkerUrl: serviceWorkerRegistration.active?.scriptURL,
+      workerState: serviceWorkerRegistration.active?.state,
+      hasSubscription: Boolean(subscription),
+      subscriptionExpiresAt: subscription?.expirationTime ?? undefined,
+    });
+    await unsubscribeFromPush(subscription, trace);
+    recordPushDiagnosticStep(trace, 'unsubscribeCompleted');
+  } catch (error) {
+    recordPushRegistrationFailure(trace, 'unsubscribeRejected', error);
+    throw error;
+  } finally {
+    await flushPushDiagnosticTrace(trace);
+  }
 }
 
 // Load custom emoji from the api if it's not cached already
@@ -242,13 +277,33 @@ export function checkIfOfflinePushFailed() {
 }
 
 export async function subscribe() {
+  const trace = createPushDiagnosticTrace('subscribe');
+  recordPushDiagnosticStep(trace, 'subscribeRequested', {
+    permission: typeof Notification !== 'undefined' ? Notification.permission : undefined,
+    isAppVisible: document.visibilityState === 'visible',
+  });
+  try {
+    await subscribeWithDiagnostics(trace);
+  } catch (error) {
+    recordPushRegistrationFailure(trace, 'subscribeRejected', error);
+    throw error;
+  } finally {
+    await flushPushDiagnosticTrace(trace);
+  }
+}
+
+async function subscribeWithDiagnostics(trace: PushDiagnosticTrace) {
   const { setDeviceToken, updateWebNotificationSettings } = getActions();
   let hasWebNotifications = false;
   let hasPushNotifications = false;
   if (!checkIfPushSupported()) {
+    recordPushDiagnosticStep(trace, 'pushUnsupported');
     // Ask for notification permissions only if service worker notifications are not supported
     // As pushManager.subscribe automatically triggers permission popup
     hasWebNotifications = await requestPermission();
+    recordPushDiagnosticStep(trace, 'permissionChecked', {
+      permission: typeof Notification !== 'undefined' ? Notification.permission : undefined,
+    });
     updateWebNotificationSettings({
       hasWebNotifications,
       hasPushNotifications,
@@ -258,13 +313,35 @@ export async function subscribe() {
   isSubscriptionFailed = false;
   const serviceWorkerRegistration = await navigator.serviceWorker.ready;
   let subscription = await serviceWorkerRegistration.pushManager.getSubscription();
-  if (!checkIfShouldResubscribe(subscription)) {
-    await ensurePushRegistration(subscription);
+  const savedPush = getGlobal().push;
+  recordPushDiagnosticStep(trace, 'subscriptionChecked', {
+    permission: Notification.permission,
+    scope: serviceWorkerRegistration.scope,
+    activeWorkerUrl: serviceWorkerRegistration.active?.scriptURL,
+    workerState: serviceWorkerRegistration.active?.state,
+    hasSubscription: Boolean(subscription),
+    subscriptionExpiresAt: subscription?.expirationTime ?? undefined,
+    hasSavedDeviceToken: Boolean(savedPush?.deviceToken),
+    hasFcmToken: Boolean(savedPush?.fcmToken),
+    subscribedAt: savedPush?.subscribedAt,
+    doesSubscriptionMatchSaved: subscription ? getDeviceToken(subscription) === savedPush?.deviceToken : undefined,
+  });
+  const shouldResubscribe = checkIfShouldResubscribe(subscription);
+  if (!shouldResubscribe) {
+    recordPushDiagnosticStep(trace, 'reusingSubscription');
+    await ensurePushRegistration(subscription, trace);
+    recordPushDiagnosticStep(trace, 'subscribeCompleted');
     return;
   }
-  await unsubscribeFromPush(subscription);
+  recordPushDiagnosticStep(trace, 'subscriptionRefreshRequired');
+  await unsubscribeFromPush(subscription, trace);
   try {
+    recordPushDiagnosticStep(trace, 'browserSubscriptionRequested');
     subscription = await subscribeToPushManager(serviceWorkerRegistration);
+    recordPushDiagnosticStep(trace, 'browserSubscriptionResolved', {
+      hasSubscription: true,
+      subscriptionExpiresAt: subscription.expirationTime ?? undefined,
+    });
     const deviceToken = getDeviceToken(subscription);
     if (DEBUG) {
       // eslint-disable-next-line no-console
@@ -272,9 +349,11 @@ export async function subscribe() {
     }
     const fcmToken = await registerFcmPush(deviceToken);
     setDeviceToken({ token: deviceToken, fcmToken });
+    recordPushDiagnosticStep(trace, 'savedDeviceTokenUpdated', { hasFcmToken: Boolean(fcmToken) });
     hasPushNotifications = Boolean(fcmToken);
     hasWebNotifications = true;
   } catch (error: any) {
+    recordPushRegistrationFailure(trace, 'subscriptionFailed', error);
     if (Notification.permission === 'denied') {
       // The user denied the notification permission which
       // means we failed to subscribe and the user will need
@@ -302,6 +381,7 @@ export async function subscribe() {
     hasWebNotifications,
     hasPushNotifications,
   });
+  recordPushDiagnosticStep(trace, 'subscribeCompleted');
 }
 
 function checkIfShouldNotify(chat: ApiChat, message: Partial<ApiMessage>) {
@@ -745,7 +825,7 @@ function getWebPushApplicationServerKey() {
   return bytes;
 }
 
-async function ensurePushRegistration(subscription: PushSubscription | null) {
+async function ensurePushRegistration(subscription: PushSubscription | null, trace: PushDiagnosticTrace) {
   if (!subscription) return;
 
   const deviceToken = getDeviceToken(subscription);
@@ -759,47 +839,91 @@ async function ensurePushRegistration(subscription: PushSubscription | null) {
   const fcmToken = await registerFcmPush(deviceToken, savedFcmToken);
   if (savedWakeUrl || deviceToken !== savedDeviceToken || fcmToken !== savedFcmToken) {
     getActions().setDeviceToken({ token: deviceToken, fcmToken });
+    recordPushDiagnosticStep(trace, 'savedDeviceTokenUpdated', { hasFcmToken: Boolean(fcmToken) });
   }
 }
 
 async function registerFcmPush(deviceToken: string, savedFcmToken?: string) {
-  if (!IS_FCM_PUSH_ENABLED) return undefined;
+  const trace = createPushDiagnosticTrace('fcmRegistration');
+  recordPushDiagnosticStep(trace, 'fcmRegistrationStarted', { hasFcmToken: Boolean(savedFcmToken) });
+  try {
+    if (!IS_FCM_PUSH_ENABLED) {
+      recordPushDiagnosticStep(trace, 'fcmDisabled');
+      return undefined;
+    }
 
-  const fcmToken = savedFcmToken || await requestFcmToken(deviceToken);
-  if (!fcmToken) return undefined;
+    recordPushDiagnosticStep(trace, savedFcmToken ? 'reusingFcmToken' : 'requestingFcmToken');
+    const fcmToken = savedFcmToken || await requestFcmToken(deviceToken);
+    recordPushDiagnosticStep(trace, 'fcmTokenReady', { hasFcmToken: Boolean(fcmToken) });
+    if (!fcmToken) return undefined;
 
-  const secret = await getOrCreatePushSecret().catch(() => undefined);
-  const result = await callApi('registerDevice', fcmToken, TELEGRAM_TOKEN_TYPE_FCM, secret);
-  if (DEBUG) {
-    // eslint-disable-next-line no-console
-    console.log('[PUSH] FCM push registered: ', Boolean(result));
+    const secret = await getOrCreatePushSecret().catch(() => undefined);
+    recordPushDiagnosticStep(trace, 'telegramRegistrationRequested');
+    const result = await callApi('registerDevice', fcmToken, TELEGRAM_TOKEN_TYPE_FCM, secret);
+    const isRegistrationSuccessful = Boolean(result);
+    recordPushDiagnosticStep(trace, 'telegramRegistrationResolved', { isRegistrationSuccessful });
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.log('[PUSH] FCM push registered: ', isRegistrationSuccessful);
+    }
+    return fcmToken;
+  } catch (error) {
+    recordPushRegistrationFailure(trace, 'fcmRegistrationRejected', error);
+    throw error;
+  } finally {
+    await flushPushDiagnosticTrace(trace);
   }
-  return fcmToken;
 }
 
 async function unregisterFcmPush(fcmToken: string) {
+  const trace = createPushDiagnosticTrace('fcmUnregistration');
+  recordPushDiagnosticStep(trace, 'fcmUnregistrationRequested', { hasFcmToken: true });
   try {
-    await callApi('unregisterDevice', fcmToken, TELEGRAM_TOKEN_TYPE_FCM);
+    const result = await callApi('unregisterDevice', fcmToken, TELEGRAM_TOKEN_TYPE_FCM);
+    recordPushDiagnosticStep(trace, 'fcmUnregistrationResolved', { isRegistrationSuccessful: Boolean(result) });
   } catch (error) {
+    recordPushRegistrationFailure(trace, 'fcmUnregistrationFailed', error);
     if (DEBUG) {
       // eslint-disable-next-line no-console
       console.log('[PUSH] Unable to unregister FCM device.', error);
     }
+  } finally {
+    await flushPushDiagnosticTrace(trace);
   }
 }
 
 async function unregisterTelegramPush(wakeUrl: string, deviceToken?: string) {
+  const trace = createPushDiagnosticTrace('telegramPushUnregistration');
+  recordPushDiagnosticStep(trace, 'telegramPushUnregistrationRequested', {
+    hasSavedDeviceToken: Boolean(deviceToken),
+  });
   try {
-    await callApi('unregisterDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
+    const result = await callApi('unregisterDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
+    recordPushDiagnosticStep(trace, 'simplePushUnregistrationResolved', { isRegistrationSuccessful: Boolean(result) });
     if (deviceToken) {
-      await callApi('unregisterDevice', buildRelayWebPushToken(deviceToken, wakeUrl), TELEGRAM_TOKEN_TYPE_WEB_PUSH);
+      const webPushResult = await callApi(
+        'unregisterDevice', buildRelayWebPushToken(deviceToken, wakeUrl), TELEGRAM_TOKEN_TYPE_WEB_PUSH,
+      );
+      recordPushDiagnosticStep(trace, 'webPushUnregistrationResolved', {
+        isRegistrationSuccessful: Boolean(webPushResult),
+      });
     }
   } catch (error) {
+    recordPushRegistrationFailure(trace, 'telegramPushUnregistrationFailed', error);
     if (DEBUG) {
       // eslint-disable-next-line no-console
       console.log('[PUSH] Unable to unregister Telegram device.', error);
     }
+  } finally {
+    await flushPushDiagnosticTrace(trace);
   }
+}
+
+function recordPushRegistrationFailure(trace: PushDiagnosticTrace, status: string, error: unknown) {
+  recordPushDiagnosticStep(trace, status, {
+    permission: typeof Notification !== 'undefined' ? Notification.permission : undefined,
+    errorName: error instanceof Error ? error.name : undefined,
+  });
 }
 
 function buildRelayWebPushToken(deviceToken: string, wakeUrl: string) {

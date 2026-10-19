@@ -1,20 +1,34 @@
-import { memo, useCallback, useEffect } from '../../../lib/teact/teact';
+import {
+  memo, useCallback, useEffect, useState,
+} from '../../../lib/teact/teact';
 import { getActions, withGlobal } from '../../../global';
 
 import type { ApiNotifyPeerType, ApiPeerNotifySettings } from '../../../api/types';
 
+import { DEBUG } from '../../../config';
+import { copyTextToClipboardFromPromise } from '../../../util/clipboard';
+import download from '../../../util/download';
 import {
   checkIfNotificationsSupported,
   checkIfOfflinePushFailed,
   playNotifySound,
 } from '../../../util/notifications';
+import {
+  clearPushDiagnostics,
+  getPushDiagnosticReport,
+  getShouldCollectPushDiagnostics,
+  setShouldCollectPushDiagnostics,
+} from '../../../util/pushDiagnostics';
 
+import useFlag from '../../../hooks/useFlag';
 import useHistoryBack from '../../../hooks/useHistoryBack';
 import useLang from '../../../hooks/useLang';
+import useLastCallback from '../../../hooks/useLastCallback';
 import useRunDebounced from '../../../hooks/useRunDebounced';
 
-import Island, { IslandTitle } from '../../gili/layout/Island';
+import Island, { IslandDescription, IslandTitle } from '../../gili/layout/Island';
 import Checkbox from '../../ui/Checkbox';
+import ListItem from '../../ui/ListItem';
 import RangeSlider from '../../ui/RangeSlider';
 
 type OwnProps = {
@@ -31,6 +45,9 @@ type StateProps = {
   notificationSoundVolume: number;
 };
 
+const PUSH_LOG_FILENAME = 'push-notifications.json';
+const OBJECT_URL_LIFETIME_MS = 60000;
+
 const SettingsNotifications = ({
   isActive,
   onReset,
@@ -44,14 +61,28 @@ const SettingsNotifications = ({
   const {
     loadNotificationSettings,
     setSettingOption,
+    showNotification,
     updateContactSignUpNotification,
     updateNotificationSettings,
     updateWebNotificationSettings,
   } = getActions();
 
+  const lang = useLang();
+  const [shouldCollectPushLogs, setShouldCollectPushLogs] = useState(DEBUG);
+  const [isPushLogReady, markPushLogReady] = useFlag();
+  const [isPushLogBusy, markPushLogBusy, clearPushLogBusy] = useFlag();
+
+  const handlePushLogFailure = useLastCallback(() => {
+    showNotification({ message: lang('PushLogFailed') });
+  });
+
   useEffect(() => {
     loadNotificationSettings();
-  }, [loadNotificationSettings]);
+    getShouldCollectPushDiagnostics().then((shouldCollect) => {
+      setShouldCollectPushLogs(shouldCollect);
+      markPushLogReady();
+    }).catch(handlePushLogFailure);
+  }, [handlePushLogFailure, loadNotificationSettings, markPushLogReady]);
 
   const runDebounced = useRunDebounced(500, true);
 
@@ -132,7 +163,56 @@ const SettingsNotifications = ({
     runDebounced(() => playNotifySound(undefined, volume));
   }, [runDebounced, updateWebNotificationSettings]);
 
-  const lang = useLang();
+  const handlePushLogChange = useLastCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const shouldCollect = e.target.checked;
+    markPushLogBusy();
+    try {
+      await setShouldCollectPushDiagnostics(shouldCollect);
+      setShouldCollectPushLogs(shouldCollect);
+    } catch {
+      handlePushLogFailure();
+    } finally {
+      clearPushLogBusy();
+    }
+  });
+
+  const handleCopyPushLog = useLastCallback(async () => {
+    markPushLogBusy();
+    await copyTextToClipboardFromPromise(
+      getPushDiagnosticReport(),
+      () => showNotification({ message: lang('TextCopied') }),
+      handlePushLogFailure,
+      'plainText',
+    );
+    clearPushLogBusy();
+  });
+
+  const handleDownloadPushLog = useLastCallback(async () => {
+    markPushLogBusy();
+    try {
+      const report = await getPushDiagnosticReport();
+      const file = new File([report], PUSH_LOG_FILENAME, { type: 'application/json' });
+      const url = URL.createObjectURL(file);
+      download(url, PUSH_LOG_FILENAME);
+      setTimeout(() => URL.revokeObjectURL(url), OBJECT_URL_LIFETIME_MS);
+    } catch {
+      handlePushLogFailure();
+    } finally {
+      clearPushLogBusy();
+    }
+  });
+
+  const handleClearPushLog = useLastCallback(async () => {
+    markPushLogBusy();
+    try {
+      await clearPushDiagnostics();
+      showNotification({ message: lang('PushLogCleared') });
+    } catch {
+      handlePushLogFailure();
+    } finally {
+      clearPushLogBusy();
+    }
+  });
 
   useHistoryBack({
     isActive,
@@ -170,6 +250,26 @@ const SettingsNotifications = ({
           onChange={handleVolumeChange}
         />
       </Island>
+
+      <IslandTitle dir={lang.isRtl ? 'rtl' : undefined}>{lang('PushLogTitle')}</IslandTitle>
+      <Island>
+        <Checkbox
+          label={lang('PushLogRecord')}
+          checked={shouldCollectPushLogs}
+          disabled={!isPushLogReady || isPushLogBusy}
+          onChange={handlePushLogChange}
+        />
+        <ListItem icon="copy" disabled={!isPushLogReady || isPushLogBusy} onClick={handleCopyPushLog}>
+          {lang('PushLogCopy')}
+        </ListItem>
+        <ListItem icon="download" disabled={!isPushLogReady || isPushLogBusy} onClick={handleDownloadPushLog}>
+          {lang('PushLogDownload')}
+        </ListItem>
+        <ListItem icon="delete" disabled={!isPushLogReady || isPushLogBusy} onClick={handleClearPushLog}>
+          {lang('PushLogClear')}
+        </ListItem>
+      </Island>
+      <IslandDescription dir={lang.isRtl ? 'rtl' : undefined}>{lang('PushLogDescription')}</IslandDescription>
 
       <IslandTitle dir={lang.isRtl ? 'rtl' : undefined}>
         {lang('AutodownloadPrivateChats')}
