@@ -2569,6 +2569,24 @@ export interface LangPair {
   'ChatClearHistoryConfirm': undefined;
   'HeaderMenuViewChannelInfo': undefined;
   'JustChat': undefined;
+  'PushLogTitle': undefined;
+  'PushLogRecord': undefined;
+  'PushLogCopy': undefined;
+  'PushLogDownload': undefined;
+  'PushLogClear': undefined;
+  'PushLogDescription': undefined;
+  'PushLogFailed': undefined;
+  'PushLogCleared': undefined;
+  'NativelyOpenConsole': undefined;
+  'NativelyConsoleFailed': undefined;
+  'PushMessageDeleted': undefined;
+  'PushMessagesRead': undefined;
+  'PushReactionsRead': undefined;
+  'PushStoriesRead': undefined;
+  'PushStoryDeleted': undefined;
+  'PushMutedMessage': undefined;
+  'PushLiveLocationUpdate': undefined;
+  'PushSessionCheck': undefined;
 }
 
 export interface LangPairWithVariables<V = LangVariable> {

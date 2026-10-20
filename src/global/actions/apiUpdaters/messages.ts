@@ -19,7 +19,9 @@ import {
   buildCollectionByKey, omit, unique,
 } from '../../../util/iteratees';
 import { getMessageKey, isLocalMessageId } from '../../../util/keys/messageKey';
-import { closeMessageNotifications, notifyAboutMessage } from '../../../util/notifications';
+import {
+  closeMessageNotifications, deleteMessageNotifications, notifyAboutMessage, updateMessageNotification,
+} from '../../../util/notifications';
 import { onTickEnd } from '../../../util/schedulers';
 import { getServerTime } from '../../../util/serverTime';
 import { callApi } from '../../../api/gramjs';
@@ -648,6 +650,14 @@ addActionHandler('apiUpdate', (global, actions, update): ActionReturnType => {
 
       setGlobal(global);
 
+      if (message.content && !areDeepEqual(message.content, currentMessage.content)) {
+        const chat = selectChat(global, chatId);
+        const updatedMessage = selectChatMessage(global, chatId, id);
+        if (chat && updatedMessage) {
+          void updateMessageNotification({ chat, message: updatedMessage });
+        }
+      }
+
       break;
     }
 
@@ -902,6 +912,7 @@ addActionHandler('apiUpdate', (global, actions, update): ActionReturnType => {
         closeMessageNotifications({
           chatId,
           lastReadInboxMessageId: readState.lastReadInboxMessageId,
+          threadId: typeof threadId === 'number' && threadId > 0 ? threadId : undefined,
         });
       }
 
@@ -1583,6 +1594,8 @@ export function deleteMessages<T extends GlobalState>(
   // Channel update
 
   if (chatId) {
+    void deleteMessageNotifications({ chatId, messageIds: ids });
+
     const chat = selectChat(global, chatId);
     if (!chat) return;
 
@@ -1655,6 +1668,8 @@ export function deleteMessages<T extends GlobalState>(
   }
 
   // Common box update
+
+  void deleteMessageNotifications({ messageIds: ids });
 
   const chatIdsToUpdate: string[] = [];
 

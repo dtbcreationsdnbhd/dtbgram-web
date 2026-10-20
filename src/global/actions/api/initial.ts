@@ -446,12 +446,13 @@ addActionHandler('loadNearestCountry', async (global): Promise<void> => {
 });
 
 addActionHandler('setDeviceToken', (global, actions, payload): ActionReturnType => {
-  const { token, wakeUrl } = payload;
+  const { token, wakeUrl, fcmToken } = payload;
   return {
     ...global,
     push: {
       deviceToken: token,
       wakeUrl,
+      fcmToken,
       subscribedAt: Date.now(),
     },
   };

@@ -1,4 +1,5 @@
 import { DEBUG } from '../config';
+import { capturePushDiagnosticSnapshot } from '../util/pushDiagnostics';
 import { pause } from '../util/schedulers';
 import { clearAssetCache, respondWithCache, respondWithCacheNetworkFirst } from './assetCache';
 import { respondForDownload } from './download';
@@ -21,6 +22,9 @@ const RE_CACHE_FIRST_ASSETS = new RegExp(
 const ACTIVATE_TIMEOUT = 3000;
 
 self.addEventListener('install', (e) => {
+  e.waitUntil(capturePushDiagnosticSnapshot('workerInstall', self.registration, {
+    workerUrl: self.location.href,
+  }));
   if (DEBUG) {
     // eslint-disable-next-line no-console
     console.log('ServiceWorker installed');
@@ -31,6 +35,9 @@ self.addEventListener('install', (e) => {
 });
 
 self.addEventListener('activate', (e) => {
+  e.waitUntil(capturePushDiagnosticSnapshot('workerActivate', self.registration, {
+    workerUrl: self.location.href,
+  }));
   if (DEBUG) {
     // eslint-disable-next-line no-console
     console.log('ServiceWorker activated');
@@ -89,6 +96,13 @@ self.addEventListener('fetch', (e: FetchEvent) => {
 });
 
 self.addEventListener('push', handlePush);
+self.addEventListener('pushsubscriptionchange', (e) => {
+  e.waitUntil(capturePushDiagnosticSnapshot('subscriptionChange', self.registration, {
+    workerUrl: self.location.href,
+    hasOldSubscription: Boolean(e.oldSubscription),
+    hasNewSubscription: Boolean(e.newSubscription),
+  }));
+});
 self.addEventListener('notificationclick', handleNotificationClick);
 self.addEventListener('message', (event) => {
   handleNotificationMessage(event);
