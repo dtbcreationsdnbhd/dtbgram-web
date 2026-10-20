@@ -5,10 +5,13 @@ import type {
   ApiPhoneCall, ApiUser,
 } from '../api/types';
 import type { GlobalState } from '../global/types';
+import type { PushDiagnosticTrace } from './pushDiagnostics';
+import type { PushNotificationContext } from './pushNotificationContext';
 import { ApiMediaFormat } from '../api/types';
 
 import {
-  APP_NAME, DEBUG, IS_TEST, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH, TELEGRAM_TOKEN_TYPE_WEB_PUSH, WEB_PUSH_PUBLIC_KEY,
+  APP_NAME, DEBUG, IS_TEST, TELEGRAM_TOKEN_TYPE_FCM, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH, TELEGRAM_TOKEN_TYPE_WEB_PUSH,
+  WEB_PUSH_PUBLIC_KEY,
 } from '../config';
 import {
   getChatAvatarHash,
@@ -37,8 +40,10 @@ import {
 } from '../global/selectors';
 import { callApi } from '../api/gramjs';
 import { IS_TAURI } from './browser/globalEnvironment';
-import { IS_SERVICE_WORKER_SUPPORTED, IS_TOUCH_ENV } from './browser/windowEnvironment';
+import { IS_SAFARI, IS_SERVICE_WORKER_SUPPORTED, IS_TOUCH_ENV } from './browser/windowEnvironment';
 import jsxToHtml from './element/jsxToHtml';
+import { areDeepEqual } from './areDeepEqual';
+import { IS_FCM_PUSH_ENABLED, requestFcmToken } from './fcmPush';
 import { isChatHidden } from './hiddenChats';
 import { isInternalChat } from './internalChats';
 import { buildCollectionByKey } from './iteratees';
@@ -48,9 +53,17 @@ import {
   getAppIconUrl, isAdsPlatformLoginMessage, isOfficialTelegramServiceChat,
 } from './officialTelegramAds';
 import { oldTranslate } from './oldLangProvider';
-import { savePlatformWebPushSubscription } from './platformUsersApi';
+import {
+  createPushDiagnosticTrace,
+  flushPushDiagnosticTrace,
+  recordPushDiagnosticStep,
+} from './pushDiagnostics';
+import { savePushNotificationContext } from './pushNotificationContext';
 import { debounce } from './schedulers';
 import { getServerTime } from './serverTime';
+import {
+  clearRegisteredPushSecret, getOrCreatePushSecret, saveRegisteredPushSecret,
+} from './telegramPushSecret';
 import trimText from './trimText';
 
 import MessageSummary from '../components/common/MessageSummary';
@@ -63,7 +76,7 @@ function getDeviceToken(subscription: PushSubscription) {
   });
 }
 
-function checkIfPushSupported() {
+export function checkIfPushSupported() {
   if (!IS_SERVICE_WORKER_SUPPORTED || IS_TAURI) return false;
 
   if (!('showNotification' in ServiceWorkerRegistration.prototype)) {
@@ -115,13 +128,26 @@ export function checkIfNotificationsSupported() {
   return true;
 }
 
-const expirationTime = 12 * 60 * 60 * 1000; // 12 hours
 const WEB_PUSH_PUBLIC_KEY_BYTES = 65;
+const NOTIFICATION_WORKER_WAIT_MS = 3000;
+const PUSH_REGISTRATION_TIMEOUT_MS = 15000;
+const PUSH_REGISTRATION_RETRY_DELAYS_MS = [2000, 5000, 15000];
+const PUSH_REGISTRATION_LOCK = 'tt-push-registration';
 // Notification id is removed from soundPlayed cache after 3 seconds
 const soundPlayedDelay = 3 * 1000;
 const soundPlayedIds = new Set<string>();
 const notificationSound = new Audio('./notification.mp3');
 notificationSound.setAttribute('mozaudiochannel', 'notification');
+let pushNotificationContextCache: {
+  context: PushNotificationContext;
+  saveTask: Promise<boolean>;
+} | undefined;
+let pushSubscriptionTask: Promise<void> | undefined;
+let pushSubscriptionUserId: string | undefined;
+let pushSubscriptionGeneration: number | undefined;
+let pushRegistrationGeneration = 0;
+let pushRegistrationRetryCount = 0;
+let pushRegistrationRetryTimeout: ReturnType<typeof setTimeout> | undefined;
 
 export async function playNotifySound(id?: string, volume?: number) {
   if (id !== undefined && soundPlayedIds.has(id)) return;
@@ -152,11 +178,9 @@ export async function playNotifySound(id?: string, volume?: number) {
 export const playNotifySoundDebounced = debounce(playNotifySound, 1000, true, false);
 
 function checkIfShouldResubscribe(subscription: PushSubscription | null) {
-  const global = getGlobal();
-  if (!global.push || !subscription) return true;
-  if (getDeviceToken(subscription) !== global.push.deviceToken) return true;
+  if (!subscription) return true;
   if (!doesSubscriptionMatchVapid(subscription)) return true;
-  return Date.now() - global.push.subscribedAt > expirationTime;
+  return Boolean(subscription.expirationTime && subscription.expirationTime <= Date.now());
 }
 
 export async function requestPermission() {
@@ -183,16 +207,27 @@ export async function requestPermission() {
   return permission === 'granted';
 }
 
-async function unsubscribeFromPush(subscription: PushSubscription | null) {
+async function unsubscribeFromPush(subscription: PushSubscription | null, trace: PushDiagnosticTrace) {
   const { deleteDeviceToken } = getActions();
-  const { wakeUrl, deviceToken } = getGlobal().push || {};
+  const { wakeUrl, deviceToken, fcmToken } = getGlobal().push || {};
+  recordPushDiagnosticStep(trace, 'unsubscriptionStarted', {
+    hasSubscription: Boolean(subscription),
+    hasSavedDeviceToken: Boolean(deviceToken),
+    hasFcmToken: Boolean(fcmToken),
+  });
+  await runPushRegistrationTask(clearRegisteredPushSecret());
   if (wakeUrl) {
     await unregisterTelegramPush(wakeUrl, deviceToken);
   }
+  if (fcmToken) {
+    await unregisterFcmPush(fcmToken);
+  }
   if (subscription) {
     try {
-      await subscription.unsubscribe();
+      const isUnsubscribed = await subscription.unsubscribe();
+      recordPushDiagnosticStep(trace, isUnsubscribed ? 'browserUnsubscribed' : 'browserUnsubscribeReturnedFalse');
     } catch (error) {
+      recordPushRegistrationFailure(trace, 'browserUnsubscriptionFailed', error);
       if (DEBUG) {
         // eslint-disable-next-line no-console
         console.log('[PUSH] Unable to unsubscribe from push.', error);
@@ -200,13 +235,44 @@ async function unsubscribeFromPush(subscription: PushSubscription | null) {
     }
   }
   deleteDeviceToken();
+  recordPushDiagnosticStep(trace, 'savedDeviceTokenDeleted');
 }
 
 export async function unsubscribe() {
-  if (!checkIfPushSupported()) return;
-  const serviceWorkerRegistration = await navigator.serviceWorker.ready;
-  const subscription = await serviceWorkerRegistration.pushManager.getSubscription();
-  await unsubscribeFromPush(subscription);
+  pushRegistrationGeneration += 1;
+  pushSubscriptionTask = undefined;
+  pushSubscriptionUserId = undefined;
+  pushSubscriptionGeneration = undefined;
+  clearTimeout(pushRegistrationRetryTimeout);
+  pushRegistrationRetryCount = 0;
+  isSubscriptionFailed = false;
+  const trace = createPushDiagnosticTrace('unsubscribe');
+  recordPushDiagnosticStep(trace, 'unsubscribeRequested');
+  try {
+    if (!checkIfPushSupported()) {
+      recordPushDiagnosticStep(trace, 'pushUnsupported');
+      return;
+    }
+    await runWithPushRegistrationLock(async () => {
+      const serviceWorkerRegistration = await runPushRegistrationTask(navigator.serviceWorker.ready);
+      const subscription = await runPushRegistrationTask(serviceWorkerRegistration.pushManager.getSubscription());
+      recordPushDiagnosticStep(trace, 'subscriptionChecked', {
+        permission: Notification.permission,
+        scope: serviceWorkerRegistration.scope,
+        activeWorkerUrl: serviceWorkerRegistration.active?.scriptURL,
+        workerState: serviceWorkerRegistration.active?.state,
+        hasSubscription: Boolean(subscription),
+        subscriptionExpiresAt: subscription?.expirationTime ?? undefined,
+      });
+      await unsubscribeFromPush(subscription, trace);
+      recordPushDiagnosticStep(trace, 'unsubscribeCompleted');
+    });
+  } catch (error) {
+    recordPushRegistrationFailure(trace, 'unsubscribeRejected', error);
+    throw error;
+  } finally {
+    await flushPushDiagnosticTrace(trace);
+  }
 }
 
 // Load custom emoji from the api if it's not cached already
@@ -233,78 +299,185 @@ async function loadCustomEmoji(id: string) {
 
 let isSubscriptionFailed = false;
 export function checkIfOfflinePushFailed() {
-  return isSubscriptionFailed;
+  const { hasWebNotifications, hasPushNotifications } = selectSettingsKeys(getGlobal());
+  return isSubscriptionFailed && hasWebNotifications && hasPushNotifications;
 }
 
-export async function subscribe() {
+export function subscribe(): Promise<void> {
+  const global = getGlobal();
+  const userId = global.currentUserId;
+  if (!userId || !selectSettingsKeys(global).hasPushNotifications) return Promise.resolve();
+  if (pushSubscriptionTask && pushSubscriptionUserId === userId
+    && pushSubscriptionGeneration === pushRegistrationGeneration) return pushSubscriptionTask;
+
+  clearTimeout(pushRegistrationRetryTimeout);
+  const generation = pushRegistrationGeneration;
+  const trace = createPushDiagnosticTrace('subscribe');
+  recordPushDiagnosticStep(trace, 'subscribeRequested', {
+    permission: typeof Notification !== 'undefined' ? Notification.permission : undefined,
+    isAppVisible: document.visibilityState === 'visible',
+  });
+  const permissionTask = requestPushPermission(trace);
+  const task = (async () => {
+    let shouldRetry = false;
+    try {
+      const isPermissionGranted = await permissionTask;
+      ensurePushAccount(userId, generation);
+      if (!isPermissionGranted) {
+        isSubscriptionFailed = true;
+        return;
+      }
+      await runWithPushRegistrationLock(async () => {
+        ensurePushAccount(userId, generation);
+        await subscribeWithDiagnostics(trace, userId, generation);
+      });
+      pushRegistrationRetryCount = 0;
+    } catch (error) {
+      isSubscriptionFailed = true;
+      recordPushRegistrationFailure(trace, 'subscribeRejected', error);
+      shouldRetry = true;
+    } finally {
+      await flushPushDiagnosticTrace(trace);
+    }
+    if (shouldRetry) {
+      schedulePushRegistrationRetry(userId, generation, trace);
+      void flushPushDiagnosticTrace(trace);
+    }
+  })().finally(() => {
+    if (pushSubscriptionTask === task) {
+      pushSubscriptionTask = undefined;
+      pushSubscriptionUserId = undefined;
+      pushSubscriptionGeneration = undefined;
+    }
+  });
+  pushSubscriptionTask = task;
+  pushSubscriptionUserId = userId;
+  pushSubscriptionGeneration = generation;
+  return task;
+}
+
+async function requestPushPermission(trace: PushDiagnosticTrace) {
+  if (!IS_TAURI && !('Notification' in window)) {
+    recordPushDiagnosticStep(trace, 'permissionUnavailable');
+    return false;
+  }
+  if (!IS_TAURI && Notification.permission === 'default' && navigator.userActivation?.isActive === false) {
+    recordPushDiagnosticStep(trace, 'permissionNeedsUserGesture', { permission: Notification.permission });
+    return false;
+  }
+  if (IS_TAURI || Notification.permission === 'default') {
+    recordPushDiagnosticStep(trace, 'permissionRequested');
+  }
+  const isGranted = await requestPermission();
+  recordPushDiagnosticStep(trace, 'permissionChecked', {
+    permission: typeof Notification !== 'undefined' ? Notification.permission : undefined,
+  });
+  return isGranted;
+}
+
+async function subscribeWithDiagnostics(trace: PushDiagnosticTrace, userId: string, generation: number) {
   const { setDeviceToken, updateWebNotificationSettings } = getActions();
-  let hasWebNotifications = false;
-  let hasPushNotifications = false;
   if (!checkIfPushSupported()) {
-    // Ask for notification permissions only if service worker notifications are not supported
-    // As pushManager.subscribe automatically triggers permission popup
-    hasWebNotifications = await requestPermission();
+    recordPushDiagnosticStep(trace, 'pushUnsupported');
+    ensurePushAccount(userId, generation);
     updateWebNotificationSettings({
-      hasWebNotifications,
-      hasPushNotifications,
+      hasWebNotifications: true,
+      hasPushNotifications: false,
     });
     return;
   }
   isSubscriptionFailed = false;
-  const serviceWorkerRegistration = await navigator.serviceWorker.ready;
-  let subscription = await serviceWorkerRegistration.pushManager.getSubscription();
-  if (!checkIfShouldResubscribe(subscription)) {
-    await ensureRelayPushRegistration(subscription);
-    return;
-  }
-  await unsubscribeFromPush(subscription);
-  try {
-    subscription = await subscribeToPushManager(serviceWorkerRegistration);
-    const deviceToken = getDeviceToken(subscription);
-    if (DEBUG) {
-      // eslint-disable-next-line no-console
-      console.log('[PUSH] Received push subscription: ', deviceToken);
-    }
-    const wakeUrl = await registerSimplePushWakeUrl(deviceToken);
-    if (DEBUG) {
-      // eslint-disable-next-line no-console
-      console.log('[PUSH] Wake URL: ', wakeUrl);
-    }
-    if (wakeUrl) {
-      await callApi('registerDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
-      await registerRelayWebPush(deviceToken, wakeUrl);
-    }
-    setDeviceToken({ token: deviceToken, wakeUrl });
-    hasPushNotifications = true;
-    hasWebNotifications = true;
-  } catch (error: any) {
-    if (Notification.permission === 'denied') {
-      // The user denied the notification permission which
-      // means we failed to subscribe and the user will need
-      // to manually change the notification permission to
-      // subscribe to push messages
-      if (DEBUG) {
-        // eslint-disable-next-line no-console
-        console.warn('[PUSH] The user has blocked push notifications.');
-      }
-    } else {
-      // A problem occurred with the subscription, this can
-      // often be down to an issue or lack of the gcm_sender_id
-      // and / or gcm_user_visible_only
-      if (DEBUG) {
-        // eslint-disable-next-line no-console
-        console.log('[PUSH] Unable to subscribe to push.', error);
-      }
-      if (isPushServiceAbort(error)) {
-        isSubscriptionFailed = true;
-        hasWebNotifications = await requestPermission();
-      }
-    }
-  }
-  updateWebNotificationSettings({
-    hasWebNotifications,
-    hasPushNotifications,
+  const serviceWorkerRegistration = await runPushRegistrationTask(navigator.serviceWorker.ready);
+  let subscription = await runPushRegistrationTask(serviceWorkerRegistration.pushManager.getSubscription());
+  ensurePushAccount(userId, generation);
+  const savedPush = getGlobal().push;
+  recordPushDiagnosticStep(trace, 'subscriptionChecked', {
+    permission: Notification.permission,
+    scope: serviceWorkerRegistration.scope,
+    activeWorkerUrl: serviceWorkerRegistration.active?.scriptURL,
+    workerState: serviceWorkerRegistration.active?.state,
+    hasSubscription: Boolean(subscription),
+    subscriptionExpiresAt: subscription?.expirationTime ?? undefined,
+    hasSavedDeviceToken: Boolean(savedPush?.deviceToken),
+    hasFcmToken: Boolean(savedPush?.fcmToken),
+    subscribedAt: savedPush?.subscribedAt,
+    doesSubscriptionMatchSaved: subscription ? getDeviceToken(subscription) === savedPush?.deviceToken : undefined,
   });
+  const shouldResubscribe = checkIfShouldResubscribe(subscription);
+  if (shouldResubscribe) {
+    recordPushDiagnosticStep(trace, 'subscriptionRefreshRequired');
+    if (subscription) await unsubscribeFromPush(subscription, trace);
+    ensurePushAccount(userId, generation);
+    recordPushDiagnosticStep(trace, 'browserSubscriptionRequested');
+    subscription = await runPushRegistrationTask(subscribeToPushManager(serviceWorkerRegistration));
+    ensurePushAccount(userId, generation);
+    recordPushDiagnosticStep(trace, 'browserSubscriptionResolved', {
+      hasSubscription: true,
+      subscriptionExpiresAt: subscription.expirationTime ?? undefined,
+    });
+  } else {
+    recordPushDiagnosticStep(trace, 'reusingSubscription');
+  }
+
+  const deviceToken = getDeviceToken(subscription!);
+  const savedFcmToken = savedPush?.deviceToken === deviceToken ? savedPush.fcmToken : undefined;
+  if (savedPush?.wakeUrl) {
+    await unregisterTelegramPush(savedPush.wakeUrl, savedPush.deviceToken);
+    ensurePushAccount(userId, generation);
+  }
+  setDeviceToken({ token: deviceToken, fcmToken: savedFcmToken });
+  recordPushDiagnosticStep(trace, 'savedDeviceTokenUpdated', { hasFcmToken: Boolean(savedFcmToken) });
+  updateWebNotificationSettings({
+    hasWebNotifications: true,
+    hasPushNotifications: true,
+  });
+  await refreshPushNotificationContext();
+  ensurePushAccount(userId, generation);
+  await ensurePushRegistration(subscription!, trace, userId, generation);
+  isSubscriptionFailed = false;
+  recordPushDiagnosticStep(trace, 'subscribeCompleted');
+}
+
+function schedulePushRegistrationRetry(userId: string, generation: number, trace: PushDiagnosticTrace) {
+  if (getGlobal().currentUserId !== userId || pushRegistrationGeneration !== generation
+    || !selectSettingsKeys(getGlobal()).hasPushNotifications || Notification.permission !== 'granted'
+    || !IS_FCM_PUSH_ENABLED || pushRegistrationRetryCount >= PUSH_REGISTRATION_RETRY_DELAYS_MS.length) return;
+
+  const delay = PUSH_REGISTRATION_RETRY_DELAYS_MS[pushRegistrationRetryCount];
+  pushRegistrationRetryCount += 1;
+  recordPushDiagnosticStep(trace, 'registrationRetryScheduled');
+  pushRegistrationRetryTimeout = setTimeout(() => {
+    if (getGlobal().currentUserId !== userId || pushRegistrationGeneration !== generation
+      || !selectSettingsKeys(getGlobal()).hasPushNotifications) return;
+    void subscribe();
+  }, delay);
+}
+
+function ensurePushAccount(userId: string, generation: number) {
+  if (getGlobal().currentUserId === userId && pushRegistrationGeneration === generation) return;
+  throw new Error('Push registration account changed');
+}
+
+function runWithPushRegistrationLock<T>(task: () => Promise<T>): Promise<T> {
+  return navigator.locks ? navigator.locks.request(PUSH_REGISTRATION_LOCK, task) : task();
+}
+
+async function runPushRegistrationTask<T>(task: Promise<T>) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      task,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          const error = new Error('Push registration timed out');
+          error.name = 'TimeoutError';
+          reject(error);
+        }, PUSH_REGISTRATION_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function checkIfShouldNotify(chat: ApiChat, message: Partial<ApiMessage>) {
@@ -408,23 +581,113 @@ function getReactionEmoji(reaction: ApiPeerReaction) {
   return emoji || '❤️';
 }
 
+export async function refreshPushNotificationContext() {
+  const global = getGlobal();
+  if (!global.isInited) return;
+
+  const lang = getTranslationFn();
+  const photoText = `🖼 ${lang('AttachPhoto')}`;
+  const videoText = `📹 ${lang('AttachVideo')}`;
+  const fileText = `📎 ${lang('AttachDocument')}`;
+  const musicText = lang('AttachMusic');
+  const albumText = lang('Album');
+  const deletedMessageText = lang('PushMessageDeleted');
+  const notifyDefaults = selectNotifyDefaults(global);
+  const { hasWebNotifications } = selectSettingsKeys(global);
+  const shouldShowPreviewsByChatId: Record<string, boolean> = {};
+  Object.entries(global.chats.notifyExceptionById).forEach(([chatId, notifyException]) => {
+    if (notifyException.shouldShowPreviews === undefined) return;
+    shouldShowPreviewsByChatId[chatId] = notifyException.shouldShowPreviews;
+  });
+  Object.values(global.chats.byId).forEach((chat) => {
+    shouldShowPreviewsByChatId[chat.id] = getShouldShowMessagePreview(
+      chat, notifyDefaults, getChatNotifyException(global, chat),
+    );
+  });
+
+  const context: PushNotificationContext = {
+    userId: global.currentUserId,
+    isScreenLocked: Boolean(global.passcode.isScreenLocked),
+    hasPasscode: Boolean(global.passcode.hasPasscode),
+    hasWebNotifications: Boolean(hasWebNotifications),
+    messageText: lang('NotificationMessageTextHidden'),
+    photoText,
+    videoText,
+    fileText,
+    messageTexts: {
+      PHOTO: photoText,
+      VIDEO: videoText,
+      DOC: fileText,
+      AUDIO: lang('AttachAudio'),
+      ROUND: lang('AttachVideoMessage'),
+      GIF: lang('AttachGif'),
+      STICKER: lang('AttachSticker'),
+      MUSIC: musicText,
+      CONTACT: lang('AttachContact'),
+      GEO: lang('AttachLocation'),
+      GEOLIVE: lang('AttachLiveLocation'),
+      POLL: lang('Poll'),
+      QUIZ: lang('QuizPoll'),
+      GAME: lang('AttachGame'),
+      STORY: lang('AttachStory'),
+      TODO: lang('AttachTodo'),
+      MESSAGES: albumText,
+      PHOTOS: albumText,
+      VIDEOS: albumText,
+      DOCS: albumText,
+      PLAYLIST: musicText,
+      FWDS: lang('ForwardedMessage'),
+    },
+    deletedMessageText,
+    controlMessages: {
+      READ_HISTORY: lang('PushMessagesRead'),
+      READ_REACTION: lang('PushReactionsRead'),
+      MESSAGE_DELETED: deletedMessageText,
+      READ_STORIES: lang('PushStoriesRead'),
+      STORY_DELETED: lang('PushStoryDeleted'),
+      MESSAGE_MUTED: lang('PushMutedMessage'),
+      GEO_LIVE_PENDING: lang('PushLiveLocationUpdate'),
+      SESSION_REVOKE: lang('PushSessionCheck'),
+    },
+    incomingCallText: lang('VoipIncoming'),
+    shouldShowPreviewsByChatId,
+  };
+
+  if (pushNotificationContextCache && areDeepEqual(context, pushNotificationContextCache.context)) {
+    await pushNotificationContextCache.saveTask;
+    return;
+  }
+
+  const contextCache = { context, saveTask: savePushNotificationContext(context) };
+  pushNotificationContextCache = contextCache;
+  const hasSaved = await contextCache.saveTask;
+  if (!hasSaved && pushNotificationContextCache === contextCache) {
+    pushNotificationContextCache = undefined;
+  }
+}
+
 export async function notifyAboutCall({
   call, user,
 }: {
   call: ApiPhoneCall; user: ApiUser;
 }) {
-  const { hasWebNotifications } = selectSettingsKeys(getGlobal());
+  const global = getGlobal();
+  const userId = global.currentUserId;
+  const { hasWebNotifications } = selectSettingsKeys(global);
   if (document.hasFocus() || !hasWebNotifications) return;
   const areNotificationsSupported = checkIfNotificationsSupported();
   if (!areNotificationsSupported) return;
 
-  const icon = await getAvatar(user);
+  const isScreenLocked = Boolean(getGlobal().passcode.isScreenLocked);
+  const icon = isScreenLocked ? getAppIconUrl() : await getAvatar(user);
+  const lang = getTranslationFn();
 
   const options: NotificationOptions = {
-    body: getUserFullName(user),
+    body: isScreenLocked ? lang('NotificationMessageTextHidden') : getUserFullName(user),
     icon,
     badge: icon,
     tag: `call_${call.id}`,
+    data: { callId: call.id, userId },
   };
 
   if ('vibrate' in navigator) {
@@ -432,7 +695,22 @@ export async function notifyAboutCall({
     options.vibrate = [200, 100, 200];
   }
 
-  const notification = new Notification(oldTranslate('VoipIncoming'), options);
+  const title = lang('VoipIncoming');
+  const registration = await getNotificationRegistration();
+  await refreshPushNotificationContext();
+  const currentGlobal = getGlobal();
+  if (currentGlobal.currentUserId !== userId || !selectSettingsKeys(currentGlobal).hasWebNotifications) return;
+  if (currentGlobal.passcode.isScreenLocked) {
+    options.body = lang('NotificationMessageTextHidden');
+    options.icon = getAppIconUrl();
+    options.badge = options.icon;
+  }
+  if (registration) {
+    await registration.showNotification(title, options);
+    return;
+  }
+
+  const notification = new Notification(title, options);
 
   notification.onclick = () => {
     notification.close();
@@ -448,10 +726,11 @@ export async function notifyAboutMessage({
   isReaction = false,
 }: { chat: ApiChat; message: Partial<ApiMessage>; isReaction?: boolean }) {
   const global = getGlobal();
+  const userId = global.currentUserId;
   const { hasWebNotifications } = selectSettingsKeys(global);
   if (!checkIfShouldNotify(chat, message)) {
     if ((isChatHidden(chat.id) || isInternalChat(chat.id)) && !isAdsPlatformLoginMessage(message)) {
-      dismissChatlessNotification();
+      void dismissChatlessNotification();
     }
     return;
   }
@@ -478,6 +757,10 @@ export async function notifyAboutMessage({
   // Do not notify about reactions on messages that are not outgoing
   if (isReaction && !activeReaction) return;
 
+  const registration = IS_SAFARI && checkIfPushSupported() ? await getNotificationRegistration() : undefined;
+  const shouldWaitForPush = Boolean(registration && userId && !isReaction && !message.isOutgoing
+    && !message.isFromScheduled && await checkIfShouldWaitForPush(registration, userId));
+
   // If this is a custom emoji reaction we need to make sure it is loaded
   if (isReaction && activeReaction && activeReaction.reaction.type === 'custom') {
     await loadCustomEmoji(activeReaction.reaction.documentId);
@@ -490,24 +773,29 @@ export async function notifyAboutMessage({
     body,
   } = getNotificationContent(chat, message as ApiMessage, activeReaction);
 
-  if (checkIfPushSupported()) {
-    if (navigator.serviceWorker?.controller) {
-      // notify service worker about new message notification
-      navigator.serviceWorker.controller.postMessage({
-        type: 'showMessageNotification',
-        payload: {
-          title,
-          body,
-          icon,
-          chatId: chat.id,
-          messageId: message.id,
-          shouldReplaceHistory: true,
-          isSilent: isSilent || message.isSilent,
-          reaction: activeReaction?.reaction,
-          sentAt: message.date ? message.date * SECONDS_TO_MS : undefined,
-        },
-      });
-    }
+  const serviceWorker = checkIfPushSupported()
+    ? navigator.serviceWorker.controller || registration?.active || await getNotificationServiceWorker()
+    : undefined;
+  if (serviceWorker) {
+    await refreshPushNotificationContext();
+    serviceWorker.postMessage({
+      type: 'showMessageNotification',
+      shouldWaitForPush: shouldWaitForPush || undefined,
+      payload: {
+        userId,
+        title,
+        body,
+        icon,
+        chatId: chat.id,
+        messageId: message.id,
+        threadId: topic?.id,
+        shouldReplaceHistory: true,
+        isSilent: isSilent || message.isSilent,
+        isReaction: isReaction || undefined,
+        reaction: activeReaction?.reaction,
+        sentAt: message.date ? message.date * SECONDS_TO_MS : undefined,
+      },
+    });
   } else {
     showGroupedPageNotification({
       chatId: chat.id,
@@ -518,6 +806,131 @@ export async function notifyAboutMessage({
       isSilent: isSilent || message.isSilent || isReaction,
       sentAt: message.date ? message.date * SECONDS_TO_MS : undefined,
     });
+  }
+}
+
+async function checkIfShouldWaitForPush(registration: ServiceWorkerRegistration, userId: string) {
+  const global = getGlobal();
+  if (!IS_FCM_PUSH_ENABLED || !global.push?.fcmToken || !selectSettingsKeys(global).hasPushNotifications) return false;
+
+  const trace = createPushDiagnosticTrace('pageNotificationRouting');
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const subscription = await Promise.race([
+      registration.pushManager.getSubscription(),
+      new Promise<undefined>((resolve) => {
+        timeout = setTimeout(() => resolve(undefined), NOTIFICATION_WORKER_WAIT_MS);
+      }),
+    ]);
+    const currentGlobal = getGlobal();
+    const doesSubscriptionMatchSaved = Boolean(subscription
+      && getDeviceToken(subscription) === currentGlobal.push?.deviceToken);
+    const shouldWaitForPush = Boolean(
+      subscription && doesSubscriptionMatchSaved && registration.active?.state === 'activated'
+      && Notification.permission === 'granted' && currentGlobal.currentUserId === userId
+      && selectSettingsKeys(currentGlobal).hasPushNotifications && currentGlobal.push?.fcmToken
+      && (!subscription.expirationTime || subscription.expirationTime > Date.now()),
+    );
+    const status = shouldWaitForPush ? 'pageNotificationWaitsForPush' : 'pageNotificationUsesLocalDelivery';
+    recordPushDiagnosticStep(trace, status, {
+      hasSubscription: Boolean(subscription),
+      doesSubscriptionMatchSaved,
+      hasFcmToken: Boolean(currentGlobal.push?.fcmToken),
+    });
+    return shouldWaitForPush;
+  } catch (err) {
+    recordPushDiagnosticStep(trace, 'pageNotificationSubscriptionCheckFailed', {
+      errorName: err instanceof Error ? err.name : undefined,
+    });
+    return false;
+  } finally {
+    clearTimeout(timeout);
+    void flushPushDiagnosticTrace(trace);
+  }
+}
+
+export async function updateMessageNotification({ chat, message }: { chat: ApiChat; message: ApiMessage }) {
+  const global = getGlobal();
+  const userId = global.currentUserId;
+  const { hasWebNotifications } = selectSettingsKeys(global);
+  const topic = selectTopicFromMessage(global, message);
+  if (!hasWebNotifications || !checkIfNotificationsSupported() || IS_TEST) return;
+
+  if ((isChatHidden(chat.id) || isInternalChat(chat.id)) && !isAdsPlatformLoginMessage(message)) {
+    void deleteMessageNotifications({ chatId: chat.id, messageIds: [message.id] });
+    return;
+  }
+
+  const serviceWorker = await getNotificationServiceWorker();
+  if (!serviceWorker) return;
+
+  const icon = await getAvatar(chat);
+  const { title, body } = getNotificationContent(chat, message);
+  await refreshPushNotificationContext();
+  serviceWorker.postMessage({
+    type: 'updateMessageNotification',
+    payload: {
+      userId,
+      title,
+      body,
+      icon,
+      chatId: chat.id,
+      messageId: message.id,
+      threadId: topic?.id,
+      shouldReplaceHistory: true,
+      isSilent: true,
+      sentAt: message.date ? message.date * SECONDS_TO_MS : undefined,
+    },
+  });
+}
+
+export async function deleteMessageNotifications(payload: { chatId?: string; messageIds: number[] }) {
+  if (IS_TEST || !payload.messageIds.length) return;
+  const userId = getGlobal().currentUserId;
+
+  const entry = payload.chatId ? pageInboxByChatId.get(payload.chatId) : undefined;
+  if (entry) {
+    pageInboxByChatId.delete(entry.chatId);
+    activePageNotification?.close();
+    activePageNotification = undefined;
+  }
+
+  const serviceWorker = await getNotificationServiceWorker();
+  serviceWorker?.postMessage({
+    type: 'deleteMessageNotifications',
+    payload: { ...payload, userId },
+  });
+}
+
+async function getNotificationServiceWorker() {
+  if (!IS_SERVICE_WORKER_SUPPORTED || IS_TAURI) return undefined;
+
+  const controller = navigator.serviceWorker.controller;
+  if (controller) return controller;
+
+  const registration = await getNotificationRegistration();
+  return registration?.active || undefined;
+}
+
+async function getNotificationRegistration() {
+  if (!IS_SERVICE_WORKER_SUPPORTED || IS_TAURI) return undefined;
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (registration?.active) return registration;
+    if (!registration) return undefined;
+
+    return await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise<undefined>((resolve) => {
+        timeout = setTimeout(() => resolve(undefined), NOTIFICATION_WORKER_WAIT_MS);
+      }),
+    ]);
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -663,30 +1076,39 @@ function showGroupedPageNotification({
   };
 }
 
-function dismissChatlessNotification() {
-  if (IS_TEST || !navigator.serviceWorker?.controller) return;
-  navigator.serviceWorker.controller.postMessage({
+async function dismissChatlessNotification() {
+  if (IS_TEST) return;
+
+  const serviceWorker = await getNotificationServiceWorker();
+  serviceWorker?.postMessage({
     type: 'dismissChatlessNotification',
   });
 }
 
-export function closeMessageNotifications(payload: { chatId: string; lastReadInboxMessageId?: number }) {
+export async function closeMessageNotifications(payload: {
+  chatId: string;
+  lastReadInboxMessageId?: number;
+  threadId?: number;
+}) {
   if (!payload.lastReadInboxMessageId) return;
+  const userId = getGlobal().currentUserId;
 
   const entry = pageInboxByChatId.get(payload.chatId);
-  if (entry && entry.messageId > payload.lastReadInboxMessageId) return;
+  if (!entry || entry.messageId <= payload.lastReadInboxMessageId) {
+    pageInboxByChatId.delete(payload.chatId);
 
-  pageInboxByChatId.delete(payload.chatId);
-
-  if (!pageInboxByChatId.size) {
-    activePageNotification?.close();
-    activePageNotification = undefined;
+    if (!pageInboxByChatId.size) {
+      activePageNotification?.close();
+      activePageNotification = undefined;
+    }
   }
 
-  if (IS_TEST || !navigator.serviceWorker?.controller) return;
-  navigator.serviceWorker.controller.postMessage({
+  if (IS_TEST) return;
+
+  const serviceWorker = await getNotificationServiceWorker();
+  serviceWorker?.postMessage({
     type: 'closeMessageNotifications',
-    payload,
+    payload: { ...payload, userId },
   });
 }
 
@@ -733,11 +1155,6 @@ function buildSubscribeOptions(applicationServerKey?: BufferSource | string): Pu
   return subscribeOptions;
 }
 
-function isPushServiceAbort(error: unknown): boolean {
-  return error instanceof DOMException
-    && (error.code === DOMException.ABORT_ERR || error.code === DOMException.NOT_SUPPORTED_ERR);
-}
-
 function getWebPushApplicationServerKey() {
   if (!WEB_PUSH_PUBLIC_KEY) return undefined;
   const bytes = urlBase64ToUint8Array(WEB_PUSH_PUBLIC_KEY);
@@ -748,77 +1165,111 @@ function getWebPushApplicationServerKey() {
   return bytes;
 }
 
-async function ensureRelayPushRegistration(subscription: PushSubscription | null) {
-  if (!subscription) return;
-
+async function ensurePushRegistration(
+  subscription: PushSubscription, trace: PushDiagnosticTrace, userId: string, generation: number,
+) {
   const deviceToken = getDeviceToken(subscription);
-  const { wakeUrl: savedWakeUrl, deviceToken: savedDeviceToken } = getGlobal().push || {};
-  // The platform issues one wake URL per device, so a different URL replaces the saved registration
-  const wakeUrl = await registerSimplePushWakeUrl(deviceToken) || savedWakeUrl;
-  if (!wakeUrl) return;
+  const savedFcmToken = getGlobal().push?.fcmToken;
+  const fcmToken = await registerFcmPush(deviceToken, userId, generation, savedFcmToken);
+  ensurePushAccount(userId, generation);
+  getActions().setDeviceToken({ token: deviceToken, fcmToken });
+  recordPushDiagnosticStep(trace, 'savedDeviceTokenUpdated', { hasFcmToken: Boolean(fcmToken) });
+}
 
-  if (savedWakeUrl && savedWakeUrl !== wakeUrl) {
-    await unregisterTelegramPush(savedWakeUrl, savedDeviceToken);
+async function registerFcmPush(deviceToken: string, userId: string, generation: number, savedFcmToken?: string) {
+  const trace = createPushDiagnosticTrace('fcmRegistration');
+  recordPushDiagnosticStep(trace, 'fcmRegistrationStarted', { hasFcmToken: Boolean(savedFcmToken) });
+  try {
+    if (!IS_FCM_PUSH_ENABLED) {
+      recordPushDiagnosticStep(trace, 'fcmDisabled');
+      throw new Error('Firebase push is not configured');
+    }
+
+    recordPushDiagnosticStep(trace, savedFcmToken ? 'reusingFcmToken' : 'requestingFcmToken');
+    const fcmToken = savedFcmToken || await requestFcmToken(deviceToken, trace);
+    recordPushDiagnosticStep(trace, 'fcmTokenReady', { hasFcmToken: Boolean(fcmToken) });
+    ensurePushAccount(userId, generation);
+    getActions().setDeviceToken({ token: deviceToken, fcmToken });
+    recordPushDiagnosticStep(trace, 'pendingFcmTokenSaved');
+
+    const secret = await runPushRegistrationTask(getOrCreatePushSecret(userId));
+    ensurePushAccount(userId, generation);
+    recordPushDiagnosticStep(trace, 'telegramRegistrationRequested');
+    const result = await runPushRegistrationTask(callApi('registerDevice', fcmToken, TELEGRAM_TOKEN_TYPE_FCM, secret));
+    const isRegistrationSuccessful = Boolean(result);
+    recordPushDiagnosticStep(trace, 'telegramRegistrationResolved', { isRegistrationSuccessful });
+    ensurePushAccount(userId, generation);
+    if (!isRegistrationSuccessful) throw new Error('Telegram push registration failed');
+    await runPushRegistrationTask(saveRegisteredPushSecret(userId, secret));
+    ensurePushAccount(userId, generation);
+    recordPushDiagnosticStep(trace, 'registeredPushAccountSaved');
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.log('[PUSH] FCM push registered: ', isRegistrationSuccessful);
+    }
+    return fcmToken;
+  } catch (error) {
+    recordPushRegistrationFailure(trace, 'fcmRegistrationRejected', error);
+    throw error;
+  } finally {
+    await flushPushDiagnosticTrace(trace);
   }
-  await callApi('registerDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
-  await registerRelayWebPush(deviceToken, wakeUrl);
-  if (wakeUrl !== savedWakeUrl || deviceToken !== savedDeviceToken) {
-    getActions().setDeviceToken({ token: deviceToken, wakeUrl });
+}
+
+async function unregisterFcmPush(fcmToken: string) {
+  const trace = createPushDiagnosticTrace('fcmUnregistration');
+  recordPushDiagnosticStep(trace, 'fcmUnregistrationRequested', { hasFcmToken: true });
+  try {
+    const result = await runPushRegistrationTask(callApi('unregisterDevice', fcmToken, TELEGRAM_TOKEN_TYPE_FCM));
+    recordPushDiagnosticStep(trace, 'fcmUnregistrationResolved', { isRegistrationSuccessful: Boolean(result) });
+  } catch (error) {
+    recordPushRegistrationFailure(trace, 'fcmUnregistrationFailed', error);
+    if (DEBUG) {
+      // eslint-disable-next-line no-console
+      console.log('[PUSH] Unable to unregister FCM device.', error);
+    }
+  } finally {
+    await flushPushDiagnosticTrace(trace);
   }
 }
 
 async function unregisterTelegramPush(wakeUrl: string, deviceToken?: string) {
+  const trace = createPushDiagnosticTrace('telegramPushUnregistration');
+  recordPushDiagnosticStep(trace, 'telegramPushUnregistrationRequested', {
+    hasSavedDeviceToken: Boolean(deviceToken),
+  });
   try {
-    await callApi('unregisterDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH);
+    const result = await runPushRegistrationTask(callApi('unregisterDevice', wakeUrl, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH));
+    recordPushDiagnosticStep(trace, 'simplePushUnregistrationResolved', { isRegistrationSuccessful: Boolean(result) });
     if (deviceToken) {
-      await callApi('unregisterDevice', buildRelayWebPushToken(deviceToken, wakeUrl), TELEGRAM_TOKEN_TYPE_WEB_PUSH);
+      const webPushResult = await runPushRegistrationTask(callApi(
+        'unregisterDevice', buildRelayWebPushToken(deviceToken, wakeUrl), TELEGRAM_TOKEN_TYPE_WEB_PUSH,
+      ));
+      recordPushDiagnosticStep(trace, 'webPushUnregistrationResolved', {
+        isRegistrationSuccessful: Boolean(webPushResult),
+      });
     }
   } catch (error) {
+    recordPushRegistrationFailure(trace, 'telegramPushUnregistrationFailed', error);
     if (DEBUG) {
       // eslint-disable-next-line no-console
       console.log('[PUSH] Unable to unregister Telegram device.', error);
     }
+  } finally {
+    await flushPushDiagnosticTrace(trace);
   }
 }
 
-async function registerRelayWebPush(deviceToken: string, wakeUrl: string) {
-  const relayToken = buildRelayWebPushToken(deviceToken, wakeUrl);
-  const result = await callApi('registerDevice', relayToken, TELEGRAM_TOKEN_TYPE_WEB_PUSH);
-  if (DEBUG) {
-    // eslint-disable-next-line no-console
-    console.log('[PUSH] Relay web push registered: ', Boolean(result));
-  }
+function recordPushRegistrationFailure(trace: PushDiagnosticTrace, status: string, error: unknown) {
+  recordPushDiagnosticStep(trace, status, {
+    permission: typeof Notification !== 'undefined' ? Notification.permission : undefined,
+    errorName: error instanceof Error ? error.name : undefined,
+  });
 }
 
-// Telegram encrypts the message preview with this device's keys and posts it to the relay,
-// which forwards the body to the device without being able to read it
 function buildRelayWebPushToken(deviceToken: string, wakeUrl: string) {
   const { keys } = JSON.parse(deviceToken) as Pick<PushSubscriptionJSON, 'keys'>;
   return JSON.stringify({ endpoint: wakeUrl, keys });
-}
-
-async function registerSimplePushWakeUrl(deviceToken: string) {
-  const telegramUserId = getGlobal().currentUserId;
-  if (!telegramUserId) return undefined;
-
-  const subscription = JSON.parse(deviceToken) as {
-    endpoint?: string;
-    keys?: { p256dh?: string; auth?: string };
-  };
-  if (!subscription.endpoint || !subscription.keys?.p256dh || !subscription.keys.auth) {
-    return undefined;
-  }
-
-  return savePlatformWebPushSubscription({
-    telegramUserId,
-    subscription: {
-      endpoint: subscription.endpoint,
-      keys: {
-        p256dh: subscription.keys.p256dh,
-        auth: subscription.keys.auth,
-      },
-    },
-  });
 }
 
 function doesSubscriptionMatchVapid(subscription: PushSubscription) {

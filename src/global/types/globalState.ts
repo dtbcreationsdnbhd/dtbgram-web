@@ -468,6 +468,7 @@ export type GlobalState = {
   push?: {
     deviceToken: string;
     wakeUrl?: string;
+    fcmToken?: string;
     subscribedAt: number;
   };
 

@@ -573,12 +573,13 @@ export async function fetchPrivacySettings(privacyKey: ApiPrivacyKey) {
   };
 }
 
-export function registerDevice(token: string, tokenType = TELEGRAM_TOKEN_TYPE_WEB_PUSH) {
+export function registerDevice(
+  token: string, tokenType = TELEGRAM_TOKEN_TYPE_WEB_PUSH, secret?: Uint8Array<ArrayBuffer>,
+) {
   return invokeRequest(new GramJs.account.RegisterDevice({
     tokenType,
-    // Web Push already encrypts the payload to the device keys, and the service worker has no access
-    // to the auth key, so Telegram's own `secret` encryption layer is left off
-    secret: new Uint8Array(0),
+    // Web Push already encrypts the payload to the device keys, so only FCM passes a `secret`
+    secret: secret || new Uint8Array(0),
     appSandbox: false,
     otherUids: [],
     token,
