@@ -1,6 +1,9 @@
 import { APP_ENV, DEBUG } from '../config';
 import { IdbStore } from './browser/idb';
 
+export type PushPreviewHiddenReason = 'contextUnavailable' | 'notificationsDisabled' | 'screenLocked'
+  | 'passcodeEnabled' | 'privatePush' | 'missingChat' | 'missingChatSettings' | 'chatPreviewsDisabled';
+
 export type PushDiagnosticDetails = {
   permission?: NotificationPermission;
   scope?: string;
@@ -23,6 +26,8 @@ export type PushDiagnosticDetails = {
   hasNotificationRequestResolved?: boolean;
   skipReason?: string;
   notificationType?: string;
+  previewHiddenReason?: PushPreviewHiddenReason;
+  hasPayloadPreviewText?: boolean;
   hasPayloadUserId?: boolean;
   hasAccountContext?: boolean;
   isPayloadAuthenticated?: boolean;
@@ -131,6 +136,8 @@ export function recordPushDiagnosticStep(
     hasNotificationRequestResolved: details?.hasNotificationRequestResolved,
     skipReason: details?.skipReason?.slice(0, MAX_TEXT_LENGTH),
     notificationType: details?.notificationType?.slice(0, MAX_TEXT_LENGTH),
+    previewHiddenReason: details?.previewHiddenReason,
+    hasPayloadPreviewText: details?.hasPayloadPreviewText,
     hasPayloadUserId: details?.hasPayloadUserId,
     hasAccountContext: details?.hasAccountContext,
     isPayloadAuthenticated: details?.isPayloadAuthenticated,

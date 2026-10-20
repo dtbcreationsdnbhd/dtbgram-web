@@ -2577,6 +2577,8 @@ export interface LangPair {
   'PushLogDescription': undefined;
   'PushLogFailed': undefined;
   'PushLogCleared': undefined;
+  'NativelyOpenConsole': undefined;
+  'NativelyConsoleFailed': undefined;
   'PushMessageDeleted': undefined;
   'PushMessagesRead': undefined;
   'PushReactionsRead': undefined;

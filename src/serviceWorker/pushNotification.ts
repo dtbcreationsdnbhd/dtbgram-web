@@ -1,10 +1,10 @@
 import type { ApiReaction } from '../api/types';
-import type { PushDiagnosticTrace } from '../util/pushDiagnostics';
+import type { PushDiagnosticTrace, PushPreviewHiddenReason } from '../util/pushDiagnostics';
 import type { PushNotificationContext } from '../util/pushNotificationContext';
 
-import { APP_NAME, DEBUG, DEBUG_MORE } from '../config';
+import { APP_NAME, CHANNEL_ID_BASE, DEBUG, DEBUG_MORE } from '../config';
 import { IdbStore } from '../util/browser/idb';
-import { toChannelId } from '../util/entities/ids';
+import { isChannelId, toChannelId } from '../util/entities/ids';
 import { isChatHidden } from '../util/hiddenChats';
 import { isInternalChat } from '../util/internalChats';
 import {
@@ -93,6 +93,8 @@ const PUSH_FLAG_FALSE = '0';
 const MAX_INBOX_CHATS = 8;
 const MAX_LINES_PER_CHAT = 5;
 const MAX_ROW_LENGTH = 60;
+const MAX_DELETED_MESSAGES = 1000;
+const MAX_PENDING_NOTIFICATION_CLOSES = 256;
 const SECONDS_TO_MS = 1000;
 const UNIX_MS_THRESHOLD = 1e12;
 const ROW_WHITESPACE_RE = /\s+/g;
@@ -111,8 +113,10 @@ const IS_SAFARI = /applewebkit/i.test(self.navigator.userAgent)
   && !/Chrom(e|ium)\//.test(self.navigator.userAgent);
 const PUSH_INBOX_STORE = new IdbStore('tt-push-inbox');
 const PUSH_INBOX_KEY = 'inbox';
+const PENDING_NOTIFICATION_CLOSES_KEY = 'pendingCloses';
 const DEFAULT_NOTIFICATION_ICON = 'icon-192x192.png';
 const SAFARI_NOTIFICATION_LIFETIME_MS = 31 * 1000;
+const SAFARI_PUSH_FALLBACK_DELAY_MS = 8000;
 const PUSH_STORAGE_TIMEOUT_MS = 2000;
 
 type NotificationEventKind = 'message' | 'reaction' | 'story' | 'storyReaction';
@@ -139,14 +143,26 @@ type AppNotificationOptions = NotificationOptions & {
   timestamp?: number;
 };
 
+type PendingNotificationClose = {
+  userId: string;
+  instanceId?: string;
+  notificationKey: string;
+  shownAt: number;
+  closeAt: number;
+};
+
 type NotificationTrace = {
   id: number;
   source: 'push' | 'showMessageNotification' | 'closeMessageNotifications' | 'dismissChatlessNotification'
-    | 'deleteMessageNotifications' | 'updateMessageNotification';
+    | 'deleteMessageNotifications' | 'updateMessageNotification' | 'cleanupMessageNotifications';
   diagnostic: PushDiagnosticTrace;
   hasNotificationRequestResolved?: boolean;
+  hasEmergencyNotificationRequestResolved?: boolean;
+  resolveNotificationRequest?: NoneToVoidFunction;
   skipReason?: string;
   notificationType?: string;
+  previewHiddenReason?: PushPreviewHiddenReason;
+  hasPayloadPreviewText?: boolean;
   notificationTask?: Promise<void>;
   isPayloadAuthenticated?: boolean;
   authenticatedUserId?: string;
@@ -157,6 +173,7 @@ type NotificationTrace = {
 
 const inboxByChatKey = new Map<string, InboxEntry>();
 const shownNotifications = new Set<string>();
+const deletedMessageKeys = new Set<string>();
 const pendingPageNotifications = new Set<NotificationData>();
 const clickBuffer: Record<string, NotificationData> = {};
 let restorePromise: Promise<void> | undefined;
@@ -167,6 +184,7 @@ let notificationQueue = Promise.resolve();
 let lastPreviewPushAt = 0;
 let lastEmptyWakeShownAt = 0;
 let lastNotificationTraceId = 0;
+let notificationCleanupTimer: ReturnType<typeof setTimeout> | undefined;
 
 function readPushRaw(event: PushEvent, trace?: NotificationTrace) {
   if (!event.data) return undefined;
@@ -205,6 +223,9 @@ function normalizePushPayload(payload: any): PushData | undefined {
   if (!custom.chat_id && source.chat_id) custom.chat_id = String(source.chat_id);
   if (!custom.channel_id && source.channel_id) custom.channel_id = String(source.channel_id);
   if (!custom.msg_id && source.msg_id) custom.msg_id = String(source.msg_id);
+  if (custom.messages === undefined && source.messages !== undefined) {
+    custom.messages = Array.isArray(source.messages) ? source.messages.join(',') : String(source.messages);
+  }
 
   const locArgs = parseLocArgs(source.loc_args);
   const notification = payload.notification;
@@ -288,11 +309,11 @@ function buildGenericPushData(): PushData {
 
 function getChatId(data: PushData) {
   if (data.custom.channel_id) {
-    return toChannelId(String(data.custom.channel_id));
+    return normalizeChannelPushId(String(data.custom.channel_id));
   }
 
   if (data.custom.chat_id) {
-    return `-${data.custom.chat_id}`;
+    return normalizeBasicChatPushId(String(data.custom.chat_id));
   }
 
   if (data.custom.from_id) {
@@ -314,8 +335,22 @@ function parsePushId(value: unknown) {
 }
 
 function parsePushIds(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.map(parsePushId).filter((id): id is number => id !== undefined);
+  }
   if (typeof value !== 'string' && typeof value !== 'number') return [];
   return String(value).split(',').map(parsePushId).filter((id): id is number => id !== undefined);
+}
+
+function normalizeChannelPushId(id: string) {
+  const peerId = BigInt(id);
+  if (peerId < -CHANNEL_ID_BASE) return String(peerId);
+  return toChannelId(String(peerId < 0n ? -peerId : peerId));
+}
+
+function normalizeBasicChatPushId(id: string) {
+  if (id.startsWith('-')) return id;
+  return `-${id}`;
 }
 
 function toNotificationTimestamp(date?: number) {
@@ -335,16 +370,21 @@ function clampNotificationTimestamp(sentAt?: number) {
   return Math.min(sentAt, Date.now());
 }
 
-function getNotificationData(data: PushData, context?: PushNotificationContext): NotificationData {
+function getNotificationData(
+  data: PushData, context?: PushNotificationContext, trace?: NotificationTrace,
+): NotificationData {
   const chatId = getChatId(data);
   const isReaction = data.loc_key.startsWith('REACT_') || data.loc_key.startsWith('CHAT_REACT_');
   const isStory = data.loc_key.startsWith('STORY_');
   const storyId = parsePushId(data.custom.story_id);
   const eventKind = isReaction ? (storyId ? 'storyReaction' : 'reaction') : (isStory ? 'story' : 'message');
-  const canShowPreview = data.user_id && data.user_id === context?.userId
-    && context.hasWebNotifications && !context.isScreenLocked && !context.hasPasscode
-    && !PRIVATE_PUSH_TYPES.has(data.loc_key)
-    && Boolean(chatId && context.shouldShowPreviewsByChatId[chatId]);
+  const shouldHidePreview = PRIVATE_PUSH_TYPES.has(data.loc_key) || undefined;
+  const previewHiddenReason = getPreviewHiddenReason({ chatId, shouldHidePreview }, context);
+  if (trace && previewHiddenReason) {
+    trace.previewHiddenReason = previewHiddenReason;
+    logNotificationTrace(trace, 'pushPreviewHidden');
+  }
+  const canShowPreview = data.user_id && data.user_id === context?.userId && !previewHiddenReason;
   let title = (isOfficialTelegramServiceChat(chatId) ? JUST_CHAT_TITLE : data.title) || APP_NAME;
   const isSilent = String(data.custom.silent) === PUSH_FLAG_TRUE || isReaction;
   if (isSilent) {
@@ -353,7 +393,7 @@ function getNotificationData(data: PushData, context?: PushNotificationContext):
   return {
     chatId,
     userId: data.user_id,
-    shouldHidePreview: PRIVATE_PUSH_TYPES.has(data.loc_key) || undefined,
+    shouldHidePreview,
     messageId: getMessageId(data),
     body: canShowPreview ? getPushMessageBody(data, context) : context?.messageText || '',
     isSilent,
@@ -424,13 +464,19 @@ function restoreInbox() {
 
   restorePromise = (async () => {
     const saved = await waitForInboxStorage(
-      PUSH_INBOX_STORE.get<{ userId?: string; entries: InboxEntry[] }>(PUSH_INBOX_KEY),
+      PUSH_INBOX_STORE.get<{ userId?: string; entries: InboxEntry[]; deletedMessageKeys?: string[] }>(PUSH_INBOX_KEY),
     );
     inboxByChatKey.clear();
     shownNotifications.clear();
+    deletedMessageKeys.clear();
     inboxUserId = notificationContext?.userId;
     hasRestoredInbox = true;
     if (saved && saved.userId !== inboxUserId) return;
+    if (Array.isArray(saved?.deletedMessageKeys)) {
+      saved.deletedMessageKeys.slice(-MAX_DELETED_MESSAGES).forEach((key) => {
+        if (typeof key === 'string') deletedMessageKeys.add(key);
+      });
+    }
     const notifications = saved || !inboxUserId ? []
       : (await self.registration.getNotifications({ tag: APP_NOTIFICATION_TAG }))
         .filter((notification) => notification.data?.userId === inboxUserId);
@@ -462,6 +508,7 @@ function saveInbox() {
   return waitForInboxStorage(PUSH_INBOX_STORE.set(PUSH_INBOX_KEY, {
     userId: inboxUserId,
     entries: Array.from(inboxByChatKey.values()),
+    deletedMessageKeys: Array.from(deletedMessageKeys),
   }));
 }
 
@@ -493,6 +540,7 @@ function getInboxMessages(entry: InboxEntry): InboxMessage[] {
   return entry.bodies.map((body, index) => ({
     body,
     messageId: index === entry.bodies.length - 1 ? entry.messageId : undefined,
+    sentAt: index === entry.bodies.length - 1 ? entry.sentAt : undefined,
     eventKind: entry.eventKind || (entry.reaction ? 'reaction' : 'message'),
     storyId: entry.storyId,
     threadId: entry.threadId,
@@ -505,7 +553,31 @@ function getNotificationKey(notification: Pick<NotificationData,
   return `${notification.chatId || '0'}:${eventKind}:${notification.storyId || notification.messageId || '0'}`;
 }
 
-function updateInboxMessages(key: string, entry: InboxEntry, messages: InboxMessage[]) {
+function getDeletedMessageKey(chatId: string | undefined, messageId: number) {
+  return !chatId || !isChannelId(chatId) ? `common:${messageId}` : `${chatId}:${messageId}`;
+}
+
+function checkIfMessageDeleted(notification: NotificationData) {
+  const eventKind = notification.eventKind || (notification.isReaction ? 'reaction' : 'message');
+  return (eventKind === 'message' || eventKind === 'reaction') && notification.messageId !== undefined
+    && deletedMessageKeys.has(getDeletedMessageKey(notification.chatId, notification.messageId));
+}
+
+function rememberDeletedMessages(chatId: string | undefined, messageIds: Iterable<number>) {
+  let hasChanged = false;
+  for (const messageId of messageIds) {
+    const key = getDeletedMessageKey(chatId, messageId);
+    if (deletedMessageKeys.has(key)) continue;
+    deletedMessageKeys.add(key);
+    hasChanged = true;
+  }
+  while (deletedMessageKeys.size > MAX_DELETED_MESSAGES) {
+    deletedMessageKeys.delete(deletedMessageKeys.values().next().value!);
+  }
+  return hasChanged;
+}
+
+function updateInboxMessages(key: string, entry: Omit<InboxEntry, 'bodies'>, messages: InboxMessage[]) {
   if (!messages.length) {
     inboxByChatKey.delete(key);
     return;
@@ -520,7 +592,7 @@ function updateInboxMessages(key: string, entry: InboxEntry, messages: InboxMess
     threadId: latest.threadId,
     eventKind: latest.eventKind,
     reaction: latest.reaction,
-    sentAt: latest.sentAt,
+    sentAt: messages.reduce<number | undefined>((sentAt, message) => latestSentAt(sentAt, message.sentAt), undefined),
   });
 }
 
@@ -544,34 +616,33 @@ function rememberInboxEntry(notification: NotificationData) {
     return false;
   }
 
+  const shouldKeepMessagePosition = matchingIndex >= 0 && !isReaction;
+  const originalSentAt = shouldKeepMessagePosition ? previousMessages[matchingIndex].sentAt : undefined;
   const message: InboxMessage = {
     body: notification.body,
     messageId: notification.messageId,
     storyId: notification.storyId,
     threadId: notification.threadId,
     editDate: notification.editDate,
-    sentAt: notification.sentAt,
+    sentAt: originalSentAt ?? notification.sentAt ?? Date.now(),
     eventKind,
     reaction: notification.reaction,
   };
-  if (matchingIndex >= 0) previousMessages.splice(matchingIndex, 1);
-  const messages = [...previousMessages, message].slice(-MAX_LINES_PER_CHAT);
-  inboxByChatKey.delete(key);
-  inboxByChatKey.set(key, {
+  if (shouldKeepMessagePosition) {
+    previousMessages[matchingIndex] = message;
+  } else {
+    if (matchingIndex >= 0) previousMessages.splice(matchingIndex, 1);
+    previousMessages.push(message);
+    inboxByChatKey.delete(key);
+  }
+  const messages = previousMessages.slice(-MAX_LINES_PER_CHAT);
+  updateInboxMessages(key, {
     chatId: notification.chatId,
     title: notification.title,
-    bodies: messages.map((item) => item.body),
-    messages,
-    messageId: notification.messageId,
     icon: notification.icon || previous?.icon,
-    reaction: notification.reaction,
-    storyId: notification.storyId,
-    threadId: notification.threadId,
-    eventKind,
     isSilent: notification.isSilent,
     shouldReplaceHistory: notification.shouldReplaceHistory,
-    sentAt: latestSentAt(previous?.sentAt, notification.sentAt),
-  });
+  }, messages);
 
   while (inboxByChatKey.size > MAX_INBOX_CHATS) {
     const oldestKey = inboxByChatKey.keys().next().value;
@@ -584,7 +655,8 @@ function rememberInboxEntry(notification: NotificationData) {
 
 function buildGroupedNotification(shouldAlert: boolean, incomingSentAt?: number) {
   sanitizeStoredInbox();
-  const entries = Array.from(inboxByChatKey.values()).reverse();
+  const entries = Array.from(inboxByChatKey.values()).reverse()
+    .sort((first, second) => (second.sentAt ?? 0) - (first.sentAt ?? 0));
   const onlyEntry = entries.length === 1 ? entries[0] : undefined;
   const title = onlyEntry ? onlyEntry.title : APP_NAME;
   // One short row per sender, newest chat first. The saved entries keep the full text.
@@ -596,10 +668,7 @@ function buildGroupedNotification(shouldAlert: boolean, incomingSentAt?: number)
     (latest, entry) => latestSentAt(latest, entry.sentAt),
     undefined,
   );
-  // A dateless message just arrived, so the card clock is the current time
-  const sentAt = shouldAlert && !incomingSentAt
-    ? Date.now()
-    : clampNotificationTimestamp(latestSentAt(newestSentAt, incomingSentAt));
+  const sentAt = clampNotificationTimestamp(latestSentAt(newestSentAt, incomingSentAt));
 
   const options: AppNotificationOptions = {
     body,
@@ -656,18 +725,52 @@ async function publishInbox(shouldAlert: boolean, incomingSentAt?: number, trace
   return publishNotification(title, options, trace);
 }
 
+async function showDeletionNotification(userId: string, trace?: NotificationTrace) {
+  notificationContext = await getPushNotificationContext();
+  if (notificationContext?.userId !== userId || !notificationContext.hasWebNotifications) return;
+  await restoreInbox();
+  const body = notificationContext.controlMessages?.MESSAGE_DELETED || notificationContext.deletedMessageText;
+  if (!body) return;
+  await publishNotification(APP_NAME, {
+    body,
+    tag: APP_NOTIFICATION_TAG,
+    icon: DEFAULT_NOTIFICATION_ICON,
+    badge: DEFAULT_NOTIFICATION_ICON,
+    silent: true,
+    data: {
+      userId,
+      isDeletionNotice: true,
+      inboxUpdatedAt: Date.now(),
+      entries: Array.from(inboxByChatKey.values()),
+    },
+  }, trace);
+}
+
 async function publishNotification(title: string, options: NotificationOptions, trace?: NotificationTrace) {
+  if (trace?.hasEmergencyNotificationRequestResolved) {
+    logNotificationTrace(trace, 'skipNotificationAfterEmergency');
+    return;
+  }
+  const notificationOptions: NotificationOptions = {
+    ...options,
+    data: { ...options.data, notificationInstanceId: crypto.randomUUID() },
+  };
   logNotificationTrace(trace, 'showNotificationAttempt');
   try {
-    await self.registration.showNotification(title, options);
+    await self.registration.showNotification(title, notificationOptions);
     logNotificationTrace(trace, 'showNotificationResolved');
     return;
   } catch (err) {
     logNotificationTrace(trace, 'showNotificationRejected', err);
   }
 
+  if (trace?.hasEmergencyNotificationRequestResolved) {
+    logNotificationTrace(trace, 'skipNotificationAfterEmergency');
+    return;
+  }
+
   // A rejected timestamp or `renotify` must not swallow the alert
-  const fallbackOptions: NotificationOptions = { ...options };
+  const fallbackOptions: NotificationOptions = { ...notificationOptions };
   Reflect.deleteProperty(fallbackOptions, 'timestamp');
   Reflect.deleteProperty(fallbackOptions, 'renotify');
   logNotificationTrace(trace, 'showNotificationRetryAttempt');
@@ -704,19 +807,25 @@ async function showPageNotification(
 }
 
 async function publishMessageNotification(notification: NotificationData, trace?: NotificationTrace) {
+  const { userId } = notification;
   notificationContext = await getPushNotificationContext();
-  if (!notification.userId || !notificationContext?.userId) {
-    logNotificationTrace(trace, notification.userId ? 'skipAccountContextUnavailable' : 'skipMissingAccount');
+  if (!userId || !notificationContext?.userId) {
+    logNotificationTrace(trace, userId ? 'skipAccountContextUnavailable' : 'skipMissingAccount');
     if (trace?.source === 'push') await showUnscopedPushNotification(trace);
     return;
   }
-  if (notification.userId !== notificationContext.userId) {
+  if (userId !== notificationContext.userId) {
     logNotificationTrace(trace, 'skipOtherAccount');
     return;
   }
-  notification = sanitizeNotification(notification);
+  notification = sanitizeNotification(notification, trace);
   logNotificationTrace(trace, 'restoringInbox');
   await restoreInbox();
+  if (checkIfMessageDeleted(notification)) {
+    logNotificationTrace(trace, 'skipDeletedMessage');
+    if (IS_SAFARI && trace?.source === 'push') await showDeletionNotification(userId, trace);
+    return;
+  }
   const hadWakeRow = inboxByChatKey.has(getInboxKey(undefined));
   if (!rememberInboxEntry(notification)) {
     // A duplicate preview still replaces the closed-app "New message" row
@@ -750,14 +859,22 @@ async function publishMessageNotification(notification: NotificationData, trace?
 async function showDuplicatePushNotification(notification: NotificationData, trace: NotificationTrace) {
   notificationContext = await getPushNotificationContext();
   await restoreInbox();
+  if (notification.userId && notification.userId === notificationContext?.userId
+    && checkIfMessageDeleted(notification)) {
+    logNotificationTrace(trace, 'skipDeletedMessage');
+    return showDeletionNotification(notification.userId, trace);
+  }
   logNotificationTrace(trace, 'duplicatePushNotificationRequested');
   if (notification.userId === inboxUserId && notification.chatId) inboxByChatKey.delete(getInboxKey(undefined));
   await saveInbox();
   return showGenericPushNotification(trace);
 }
 
-function sanitizeNotification(notification: NotificationData): NotificationData {
-  if (checkIfCanShowPreview(notification)) return notification;
+function sanitizeNotification(notification: NotificationData, trace?: NotificationTrace): NotificationData {
+  const previewHiddenReason = getPreviewHiddenReason(notification, notificationContext);
+  if (trace) trace.previewHiddenReason = previewHiddenReason;
+  if (!previewHiddenReason) return notification;
+  logNotificationTrace(trace, 'notificationPreviewHidden');
   return {
     ...notification,
     title: APP_NAME,
@@ -767,14 +884,26 @@ function sanitizeNotification(notification: NotificationData): NotificationData 
 }
 
 function checkIfCanShowPreview(notification: Pick<NotificationData, 'chatId' | 'shouldHidePreview'>) {
-  const canShowPreview = notificationContext?.hasWebNotifications && !notificationContext.isScreenLocked
-    && !notificationContext.hasPasscode && !notification.shouldHidePreview
-    && Boolean(notification.chatId && notificationContext.shouldShowPreviewsByChatId[notification.chatId]);
-  return Boolean(canShowPreview);
+  return !getPreviewHiddenReason(notification, notificationContext);
+}
+
+function getPreviewHiddenReason(
+  notification: Pick<NotificationData, 'chatId' | 'shouldHidePreview'>, context?: PushNotificationContext,
+): PushPreviewHiddenReason | undefined {
+  if (!context) return 'contextUnavailable';
+  if (!context.hasWebNotifications) return 'notificationsDisabled';
+  if (context.isScreenLocked) return 'screenLocked';
+  if (context.hasPasscode) return 'passcodeEnabled';
+  if (notification.shouldHidePreview) return 'privatePush';
+  if (!notification.chatId) return 'missingChat';
+  const shouldShowPreviews = context.shouldShowPreviewsByChatId[notification.chatId];
+  if (shouldShowPreviews === undefined) return 'missingChatSettings';
+  if (!shouldShowPreviews) return 'chatPreviewsDisabled';
+  return undefined;
 }
 
 function publishSingleNotification(notification: NotificationData, shouldAlert: boolean, trace?: NotificationTrace) {
-  notification = sanitizeNotification(notification);
+  notification = sanitizeNotification(notification, trace);
   const options: NotificationOptions = {
     body: notification.body,
     data: {
@@ -816,8 +945,19 @@ async function closeNotifications({
   }, trace, userId));
 }
 
+function checkIfNotificationChatMatches(chatId: string | undefined, notificationChatId?: string) {
+  if (!notificationChatId) return false;
+  if (chatId) return notificationChatId === chatId;
+  // Private chats and basic groups share an account-wide message ID sequence
+  return !isChannelId(notificationChatId);
+}
+
 async function removeInboxNotifications(
-  chatId: string, shouldRemove: (message: InboxMessage) => boolean, trace?: NotificationTrace, userId?: string,
+  chatId: string | undefined,
+  shouldRemove: (message: InboxMessage) => boolean,
+  trace?: NotificationTrace,
+  userId?: string,
+  deletedMessageIds?: Iterable<number>,
 ) {
   notificationContext = await getPushNotificationContext();
   if (!userId || userId !== notificationContext?.userId) {
@@ -825,7 +965,7 @@ async function removeInboxNotifications(
     return;
   }
   pendingPageNotifications.forEach((notification) => {
-    if (notification.userId === userId && notification.chatId === chatId
+    if (notification.userId === userId && checkIfNotificationChatMatches(chatId, notification.chatId)
       && shouldRemove({
         ...notification,
         eventKind: notification.eventKind || (notification.isReaction ? 'reaction' : 'message'),
@@ -834,56 +974,150 @@ async function removeInboxNotifications(
     }
   });
   await restoreInbox();
-  const key = getInboxKey(chatId);
-  const entry = inboxByChatKey.get(key);
+  const shouldNotifyAboutDeletion = Boolean(deletedMessageIds);
+  const hasDeletedMessagesChanged = deletedMessageIds ? rememberDeletedMessages(chatId, deletedMessageIds) : false;
   let hasChanged = false;
-  if (entry) {
+  inboxByChatKey.forEach((entry, key) => {
+    if (!checkIfNotificationChatMatches(chatId, entry.chatId)) return;
     const messages = getInboxMessages(entry);
-    const remainingMessages = messages.filter((message) => !shouldRemove(message));
-    if (remainingMessages.length !== messages.length) {
-      hasChanged = true;
-      messages.filter(shouldRemove).forEach((message) => {
-        shownNotifications.delete(getNotificationKey({ ...message, chatId }));
-      });
-      updateInboxMessages(key, entry, remainingMessages);
-      await saveInbox();
-      logNotificationTrace(trace, 'inboxUpdated');
-    }
+    const nextMessages = messages.filter((message) => !shouldRemove(message));
+    if (nextMessages.length === messages.length) return;
+    hasChanged = true;
+    messages.filter(shouldRemove).forEach((message) => {
+      shownNotifications.delete(getNotificationKey({ ...message, chatId: entry.chatId }));
+    });
+    updateInboxMessages(key, entry, nextMessages);
+  });
+  if (hasChanged || hasDeletedMessagesChanged) {
+    await saveInbox();
   }
+  if (hasChanged) logNotificationTrace(trace, 'inboxUpdated');
+  if (!hasChanged) logNotificationTrace(trace, 'noMatchingInboxMessages');
   if (!IS_SAFARI) {
     if (hasChanged) await publishInbox(false, undefined, trace);
+    if (shouldNotifyAboutDeletion && !inboxByChatKey.size && (hasChanged || trace?.source === 'push')) {
+      await showDeletionNotification(userId, trace);
+    }
     return;
   }
   const notifications = await self.registration.getNotifications({ tag: APP_NOTIFICATION_TAG });
+  const pendingCloses: PendingNotificationClose[] = [];
   notifications.forEach((notification) => {
     const data = notification.data;
-    if (data?.userId !== userId || data.chatId !== chatId || !data.inboxUpdatedAt
-      || Date.now() - data.inboxUpdatedAt < SAFARI_NOTIFICATION_LIFETIME_MS) return;
-    if (shouldRemove({
+    if (data?.userId !== userId || !Number.isFinite(data.inboxUpdatedAt) || data.isDeletionNotice
+      || !checkIfNotificationMatches(notification, chatId, shouldRemove)) return;
+    const closeAt = data.inboxUpdatedAt + SAFARI_NOTIFICATION_LIFETIME_MS;
+    if (Date.now() < closeAt) {
+      pendingCloses.push({
+        userId,
+        instanceId: data.notificationInstanceId,
+        notificationKey: getNotificationKey(data),
+        shownAt: data.inboxUpdatedAt,
+        closeAt,
+      });
+      return;
+    }
+    notification.close();
+  });
+  if (pendingCloses.length) await deferNotificationCloses(pendingCloses, trace);
+  if (shouldNotifyAboutDeletion && hasChanged) await showDeletionNotification(userId, trace);
+}
+
+function checkIfNotificationMatches(
+  notification: Notification, chatId: string | undefined, shouldRemove: (message: InboxMessage) => boolean,
+) {
+  const data = notification.data;
+  if (data.chatId) {
+    return checkIfNotificationChatMatches(chatId, data.chatId) && shouldRemove({
       body: notification.body,
       messageId: data.messageId,
       storyId: data.storyId,
       threadId: data.threadId,
       eventKind: data.eventKind || 'message',
-    })) notification.close();
+    });
+  }
+  return Array.isArray(data.entries) && data.entries.some((entry: unknown) => isInboxEntry(entry)
+    && checkIfNotificationChatMatches(chatId, entry.chatId) && getInboxMessages(entry).some(shouldRemove));
+}
+
+async function deferNotificationCloses(closes: PendingNotificationClose[], trace?: NotificationTrace) {
+  const pendingCloses = await loadPendingNotificationCloses();
+  closes.forEach((close) => {
+    if (pendingCloses.some((pending) => pending.userId === close.userId
+      && pending.instanceId === close.instanceId
+      && pending.notificationKey === close.notificationKey && pending.shownAt === close.shownAt)) return;
+    pendingCloses.push(close);
   });
+  await waitForInboxStorage(PUSH_INBOX_STORE.set(
+    PENDING_NOTIFICATION_CLOSES_KEY, pendingCloses.slice(-MAX_PENDING_NOTIFICATION_CLOSES),
+  ));
+  logNotificationTrace(trace, 'notificationCleanupDeferred');
+}
+
+async function processPendingNotificationCloses(trace?: NotificationTrace) {
+  clearTimeout(notificationCleanupTimer);
+  notificationCleanupTimer = undefined;
+  const pendingCloses = await loadPendingNotificationCloses();
+  if (!pendingCloses.length) return;
+  const notifications = await self.registration.getNotifications({ tag: APP_NOTIFICATION_TAG });
+  const remainingCloses: PendingNotificationClose[] = [];
+  pendingCloses.forEach((close) => {
+    const matching = notifications.filter((notification) => notification.data?.userId === close.userId
+      && !notification.data.isDeletionNotice
+      && notification.data.notificationInstanceId === close.instanceId
+      && notification.data.inboxUpdatedAt === close.shownAt
+      && getNotificationKey(notification.data) === close.notificationKey);
+    if (!matching.length) return;
+    if (Date.now() < close.closeAt) {
+      remainingCloses.push(close);
+      return;
+    }
+    matching.forEach((notification) => notification.close());
+    logNotificationTrace(trace, 'notificationCleanupRequested');
+  });
+  await waitForInboxStorage(PUSH_INBOX_STORE.set(PENDING_NOTIFICATION_CLOSES_KEY, remainingCloses));
+  if (!remainingCloses.length) return;
+  const cleanupAt = Math.min(...remainingCloses.map((close) => close.closeAt));
+  notificationCleanupTimer = setTimeout(() => {
+    const cleanupTrace = createNotificationTrace('cleanupMessageNotifications');
+    void trackNotificationTask(
+      enqueueNotificationTask(() => processPendingNotificationCloses(cleanupTrace)), cleanupTrace,
+    ).catch(() => undefined);
+  }, Math.max(0, cleanupAt - Date.now()));
+  const clients = await getClients();
+  clients.forEach((client) => client.postMessage({ type: 'scheduleNotificationCleanup', payload: { cleanupAt } }));
+}
+
+async function loadPendingNotificationCloses() {
+  const saved = await waitForInboxStorage(PUSH_INBOX_STORE.get<unknown>(PENDING_NOTIFICATION_CLOSES_KEY));
+  return Array.isArray(saved) ? saved.filter(isPendingNotificationClose).slice(-MAX_PENDING_NOTIFICATION_CLOSES) : [];
+}
+
+function isPendingNotificationClose(value: unknown): value is PendingNotificationClose {
+  if (!value || typeof value !== 'object') return false;
+  const close = value as PendingNotificationClose;
+  return typeof close.userId === 'string' && typeof close.notificationKey === 'string'
+    && (close.instanceId === undefined || typeof close.instanceId === 'string')
+    && Number.isFinite(close.shownAt) && Number.isFinite(close.closeAt)
+    && close.closeAt >= close.shownAt + SAFARI_NOTIFICATION_LIFETIME_MS;
 }
 
 function deleteMessageNotifications(
-  { chatId, messageIds, userId }: { chatId: string; messageIds: number[]; userId?: string }, trace?: NotificationTrace,
+  { chatId, messageIds, userId }: { chatId?: string; messageIds: number[]; userId?: string }, trace?: NotificationTrace,
 ) {
   const deletedIds = new Set(messageIds);
+  logNotificationTrace(trace, chatId ? 'chatDeletionReceived' : 'commonBoxDeletionReceived');
   return enqueueNotificationTask(() => removeInboxNotifications(chatId, (message) => {
     return (message.eventKind === 'message' || message.eventKind === 'reaction')
-      && (message.messageId === undefined || deletedIds.has(message.messageId));
-  }, trace, userId));
+      && (message.messageId === undefined ? Boolean(chatId) : deletedIds.has(message.messageId));
+  }, trace, userId, messageIds));
 }
 
 function updateMessageNotification(notification: NotificationData, trace?: NotificationTrace) {
   return enqueueNotificationTask(async () => {
     notificationContext = await getPushNotificationContext();
     if (!notification.userId || notification.userId !== notificationContext?.userId) return;
-    notification = sanitizeNotification(notification);
+    notification = sanitizeNotification(notification, trace);
     pendingPageNotifications.forEach((pendingNotification) => {
       if (pendingNotification.userId === notification.userId && pendingNotification.chatId === notification.chatId
         && pendingNotification.messageId === notification.messageId) {
@@ -993,6 +1227,7 @@ async function processPush(raw: unknown, trace: NotificationTrace) {
   const data = rawToPushData(payload);
   trace.hasPayloadUserId = Boolean(data.user_id);
   trace.hasAccountContext = Boolean(context?.userId);
+  trace.hasPayloadPreviewText = Boolean(data.hasPreviewText);
   if (data.user_id && trace.authenticatedUserId && data.user_id !== trace.authenticatedUserId) {
     logNotificationTrace(trace, 'skipRegisteredAccountMismatch');
     return;
@@ -1044,7 +1279,7 @@ async function processPush(raw: unknown, trace: NotificationTrace) {
     return undefined;
   }
 
-  const notification = getNotificationData(data, context);
+  const notification = getNotificationData(data, context, trace);
   if (notification.chatId) {
     const shouldShowPreviews = context.shouldShowPreviewsByChatId[notification.chatId];
     if (shouldShowPreviews === undefined) {
@@ -1084,7 +1319,7 @@ async function processPush(raw: unknown, trace: NotificationTrace) {
     return enqueueNotificationTask(async () => {
       notificationContext = await getPushNotificationContext();
       if (!data.user_id || data.user_id !== notificationContext?.userId) return;
-      const preview = sanitizeNotification(getNotificationData(data, notificationContext));
+      const preview = sanitizeNotification(getNotificationData(data, notificationContext, trace), trace);
       const notificationTask = publishNotification(
         data.loc_key === 'PHONE_CALL_REQUEST' ? notificationContext?.incomingCallText || APP_NAME : APP_NAME,
         {
@@ -1143,6 +1378,17 @@ async function updateAppBadge(value: PushData['badge'], trace?: NotificationTrac
 
 async function handleControlPush(data: PushData, trace?: NotificationTrace) {
   logNotificationTrace(trace, 'controlPushReceived');
+  if (data.loc_key === 'MESSAGE_DELETED') {
+    if (data.custom.channel_id) {
+      logNotificationTrace(trace, 'channelDeletionPushReceived');
+    } else if (data.custom.chat_id) {
+      logNotificationTrace(trace, 'basicGroupDeletionPushReceived');
+    } else if (data.custom.from_id) {
+      logNotificationTrace(trace, 'privateDeletionPushReceived');
+    } else {
+      logNotificationTrace(trace, 'unscopedDeletionPushReceived');
+    }
+  }
   const chatId = getChatId(data);
   const messageIds = new Set(parsePushIds(data.custom.messages));
   const storyIds = new Set(parsePushIds(data.custom.story_id));
@@ -1170,7 +1416,7 @@ async function handleControlPush(data: PushData, trace?: NotificationTrace) {
         default:
           return false;
       }
-    }, trace, data.user_id));
+    }, trace, data.user_id, data.loc_key === 'MESSAGE_DELETED' ? messageIds : undefined));
   }
   if (data.loc_key !== 'SESSION_REVOKE' || (trace?.isPayloadAuthenticated && data.user_id)) {
     await notifyClientsOfPushState(data.loc_key, data.user_id);
@@ -1279,6 +1525,10 @@ export function handleClientMessage(e: ExtendableMessageEvent) {
       e.waitUntil(focusChatMessage(source, data));
     }
   }
+  if (IS_SAFARI && (e.data.type === 'clientReady' || e.data.type === 'cleanupMessageNotifications')) {
+    const trace = createNotificationTrace('cleanupMessageNotifications');
+    e.waitUntil(trackNotificationTask(enqueueNotificationTask(() => processPendingNotificationCloses(trace)), trace));
+  }
   if (e.data.type === 'showMessageNotification') {
     const trace = createNotificationTrace('showMessageNotification');
     logNotificationTrace(trace, 'clientMessageReceived');
@@ -1319,6 +1569,23 @@ function createNotificationTrace(source: NotificationTrace['source']): Notificat
 
 async function trackNotificationTask(task: Promise<unknown>, trace?: NotificationTrace) {
   if (!trace) return task;
+  const processingTask = processNotificationTask(task, trace);
+  try {
+    if (IS_SAFARI && trace.source === 'push') {
+      await ensurePushNotification(processingTask, trace);
+    }
+    return await processingTask;
+  } finally {
+    if (trace.source === 'push') {
+      trace.hasNotificationRequestResolved ??= false;
+      logNotificationTrace(trace, trace.hasNotificationRequestResolved
+        ? 'pushNotificationRequestResolved' : 'pushCompletedWithoutNotification');
+    }
+    await flushPushDiagnosticTrace(trace.diagnostic);
+  }
+}
+
+async function processNotificationTask(task: Promise<unknown>, trace: NotificationTrace) {
   try {
     const result = await task;
     logNotificationTrace(trace, 'processingCompleted');
@@ -1330,18 +1597,47 @@ async function trackNotificationTask(task: Promise<unknown>, trace?: Notificatio
   } finally {
     // A sound failure can settle processing before the notification request finishes
     await trace.notificationTask?.catch(() => undefined);
-    try {
-      if (IS_SAFARI && trace.source === 'push' && !trace.hasNotificationRequestResolved) {
-        await enqueueNotificationTask(() => showGenericPushNotification(trace));
-      }
-    } finally {
-      if (trace.source === 'push') {
-        trace.hasNotificationRequestResolved ??= false;
-        logNotificationTrace(trace, trace.hasNotificationRequestResolved
-          ? 'pushNotificationRequestResolved' : 'pushCompletedWithoutNotification');
-      }
-      await flushPushDiagnosticTrace(trace.diagnostic);
+    if (IS_SAFARI && trace.source === 'push' && !trace.hasNotificationRequestResolved) {
+      await enqueueNotificationTask(() => showGenericPushNotification(trace));
     }
+    if (IS_SAFARI && trace.source !== 'cleanupMessageNotifications') {
+      await enqueueNotificationTask(() => processPendingNotificationCloses(trace))
+        .catch((err: unknown) => logNotificationTrace(trace, 'notificationCleanupFailed', err));
+    }
+  }
+}
+
+async function ensurePushNotification(task: Promise<unknown>, trace: NotificationTrace) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const notificationTask = new Promise<void>((resolve) => {
+    trace.resolveNotificationRequest = resolve;
+  });
+  const timeoutTask = new Promise<void>((resolve) => {
+    timeout = setTimeout(() => {
+      logNotificationTrace(trace, 'pushNotificationDeadlineExceeded');
+      resolve();
+    }, SAFARI_PUSH_FALLBACK_DELAY_MS);
+  });
+
+  try {
+    await Promise.race([notificationTask, task.catch(() => undefined), timeoutTask]);
+  } finally {
+    clearTimeout(timeout);
+    trace.resolveNotificationRequest = undefined;
+  }
+  if (trace.hasNotificationRequestResolved) return;
+
+  // The emergency card has no storage, queue, resource, or account dependencies
+  logNotificationTrace(trace, 'emergencyPushNotificationRequested');
+  logNotificationTrace(trace, 'showNotificationAttempt');
+  try {
+    await self.registration.showNotification(APP_NAME, { tag: APP_NOTIFICATION_TAG, silent: true });
+    trace.hasEmergencyNotificationRequestResolved = true;
+    logNotificationTrace(trace, 'showNotificationResolved');
+  } catch (err) {
+    logNotificationTrace(trace, 'showNotificationRejected', err);
+  } finally {
+    await flushPushDiagnosticTrace(trace.diagnostic);
   }
 }
 
@@ -1367,6 +1663,7 @@ async function showGenericPushNotification(trace: NotificationTrace) {
     silent: true,
     data: {
       userId: inboxUserId,
+      isDeletionNotice: notificationType === 'MESSAGE_DELETED' || undefined,
       inboxUpdatedAt: Date.now(),
       entries: Array.from(inboxByChatKey.values()),
     },
@@ -1393,6 +1690,7 @@ function logNotificationTrace(trace: NotificationTrace | undefined, status: stri
   if (!trace) return;
   if (status === 'showNotificationResolved' || status === 'showNotificationRetryResolved') {
     trace.hasNotificationRequestResolved = true;
+    trace.resolveNotificationRequest?.();
   }
   if (status.startsWith('skip')) {
     trace.skipReason = status;
@@ -1409,6 +1707,8 @@ function logNotificationTrace(trace: NotificationTrace | undefined, status: stri
     hasNotificationRequestResolved: trace.hasNotificationRequestResolved,
     skipReason: trace.skipReason,
     notificationType: trace.notificationType,
+    previewHiddenReason: trace.previewHiddenReason,
+    hasPayloadPreviewText: trace.hasPayloadPreviewText,
     hasPayloadUserId: trace.hasPayloadUserId,
     hasAccountContext: trace.hasAccountContext,
     isPayloadAuthenticated: trace.isPayloadAuthenticated,

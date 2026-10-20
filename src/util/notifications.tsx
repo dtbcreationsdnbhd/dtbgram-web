@@ -884,13 +884,13 @@ export async function updateMessageNotification({ chat, message }: { chat: ApiCh
   });
 }
 
-export async function deleteMessageNotifications(payload: { chatId: string; messageIds: number[] }) {
+export async function deleteMessageNotifications(payload: { chatId?: string; messageIds: number[] }) {
   if (IS_TEST || !payload.messageIds.length) return;
   const userId = getGlobal().currentUserId;
 
-  const entry = pageInboxByChatId.get(payload.chatId);
+  const entry = payload.chatId ? pageInboxByChatId.get(payload.chatId) : undefined;
   if (entry) {
-    pageInboxByChatId.delete(payload.chatId);
+    pageInboxByChatId.delete(entry.chatId);
     activePageNotification?.close();
     activePageNotification = undefined;
   }

@@ -6,8 +6,10 @@ import { getActions, getPromiseActions, withGlobal } from '../../../global';
 import type { ApiNotifyPeerType, ApiPeerNotifySettings } from '../../../api/types';
 
 import { DEBUG } from '../../../config';
+import { requestMutation } from '../../../lib/fasterdom/fasterdom';
 import { copyTextToClipboardFromPromise } from '../../../util/clipboard';
 import download from '../../../util/download';
+import { checkIfNativelyApp, openNativelyConsole } from '../../../util/natively';
 import {
   checkIfNotificationsSupported,
   checkIfPushSupported,
@@ -72,6 +74,7 @@ const SettingsNotifications = ({
   const [shouldCollectPushLogs, setShouldCollectPushLogs] = useState(DEBUG);
   const [isPushLogReady, markPushLogReady] = useFlag();
   const [isPushLogBusy, markPushLogBusy, clearPushLogBusy] = useFlag();
+  const [isNativelyConsoleBusy, markNativelyConsoleBusy, clearNativelyConsoleBusy] = useFlag();
 
   const handlePushLogFailure = useLastCallback(() => {
     showNotification({ message: lang('PushLogFailed') });
@@ -89,6 +92,7 @@ const SettingsNotifications = ({
 
   const areNotificationsSupported = checkIfNotificationsSupported();
   const areOfflineNotificationsSupported = areNotificationsSupported && checkIfPushSupported();
+  const isNativelyApp = checkIfNativelyApp();
 
   const areChannelsMuted = Boolean(notifyDefaults?.channels?.mutedUntil);
   const areGroupsMuted = Boolean(notifyDefaults?.groups?.mutedUntil);
@@ -216,6 +220,15 @@ const SettingsNotifications = ({
     }
   });
 
+  const handleOpenNativelyConsole = useLastCallback(() => {
+    markNativelyConsoleBusy();
+    requestMutation(() => {
+      void openNativelyConsole().catch(() => {
+        showNotification({ message: lang('NativelyConsoleFailed') });
+      }).finally(clearNativelyConsoleBusy);
+    });
+  });
+
   useHistoryBack({
     isActive,
     onBack: onReset,
@@ -270,6 +283,11 @@ const SettingsNotifications = ({
         <ListItem icon="delete" disabled={!isPushLogReady || isPushLogBusy} onClick={handleClearPushLog}>
           {lang('PushLogClear')}
         </ListItem>
+        {isNativelyApp && (
+          <ListItem icon="bug" disabled={isNativelyConsoleBusy} onClick={handleOpenNativelyConsole}>
+            {lang('NativelyOpenConsole')}
+          </ListItem>
+        )}
       </Island>
       <IslandDescription dir={lang.isRtl ? 'rtl' : undefined}>{lang('PushLogDescription')}</IslandDescription>
 

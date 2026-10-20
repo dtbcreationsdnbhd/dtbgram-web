@@ -24,7 +24,6 @@ type WorkerAction = {
   payload: Record<string, any>;
 };
 
-const IGNORE_WORKER_PATH = '/k/';
 const SW_CLAIM_RELOAD_KEY = 'tt-sw-claim-reload';
 const CONTROLLER_WAIT_MS = 4000;
 const PUSH_DIAGNOSTIC_READ_TIMEOUT_MS = 2000;
@@ -35,6 +34,7 @@ const SERVICE_WORKER_OPTIONS: RegistrationOptions = import.meta.env.DEV
 const refreshPushChatContextThrottled = throttle(refreshPushNotificationContext, PUSH_CHAT_CONTEXT_REFRESH_MS, false);
 
 let previousGlobal: GlobalState | undefined;
+let notificationCleanupTimeout: number | undefined;
 
 function handlePushContextChange(global: GlobalState) {
   const oldGlobal = previousGlobal;
@@ -86,6 +86,11 @@ function handleWorkerMessage(e: MessageEvent) {
     case 'playNotificationSound':
       playNotifySoundDebounced(action.payload.id);
       break;
+    case 'scheduleNotificationCleanup':
+      if (typeof payload?.cleanupAt === 'number' && Number.isFinite(payload.cleanupAt)) {
+        scheduleNotificationCleanup(payload.cleanupAt);
+      }
+      break;
     case 'share':
       dispatch.openChatWithDraft({
         text: formatShareText(payload.url, payload.text, payload.title),
@@ -93,6 +98,15 @@ function handleWorkerMessage(e: MessageEvent) {
       });
       break;
   }
+}
+
+function scheduleNotificationCleanup(cleanupAt: number) {
+  window.clearTimeout(notificationCleanupTimeout);
+  notificationCleanupTimeout = window.setTimeout(() => {
+    notificationCleanupTimeout = undefined;
+    const controller = navigator.serviceWorker.controller;
+    if (controller) controller.postMessage({ type: 'cleanupMessageNotifications' });
+  }, Math.max(0, cleanupAt - Date.now()));
 }
 
 async function subscribeToWorker() {
@@ -123,22 +137,6 @@ function waitForController() {
 async function registerServiceWorker() {
   try {
     await recordPagePushState('pageStartup');
-    const controller = navigator.serviceWorker.controller;
-    if (!controller || controller.scriptURL.includes(IGNORE_WORKER_PATH)) {
-      const registrations = await navigator.serviceWorker.getRegistrations();
-      const ourRegistrations = registrations.filter((r) => !r.scope.includes(IGNORE_WORKER_PATH));
-      if (ourRegistrations.length) {
-        if (DEBUG) {
-          // eslint-disable-next-line no-console
-          console.log('[SW] Hard reload detected, re-enabling Service Worker');
-        }
-        await Promise.all(ourRegistrations.map(async (registration) => {
-          await capturePushDiagnosticSnapshot('workerUnregisterRequested', registration);
-          return registration.unregister();
-        }));
-      }
-    }
-
     const registration = await navigator.serviceWorker.register(serviceWorkerUrl, SERVICE_WORKER_OPTIONS);
     await capturePushDiagnosticSnapshot('workerRegistered', registration);
 
@@ -203,6 +201,7 @@ if (IS_SERVICE_WORKER_SUPPORTED) {
 
   document.addEventListener('visibilitychange', async () => {
     await refreshPushNotificationContext();
+    if (document.visibilityState === 'visible') notifyClientReady();
     void recordPagePushState('pageVisibility');
   });
 }
