@@ -11,5 +11,3 @@ tests/
 dev/perf/screenshot*
 .DS_store
 .archive/internal-messages.sqlite
-docs/*
-!docs/NATIVELY_FULL_PREVIEW_PUSH_PLAN.md
