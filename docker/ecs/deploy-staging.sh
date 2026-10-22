@@ -40,6 +40,7 @@ docker build \
   --build-arg APP_ENV=staging \
   --build-arg HEAD=staging \
   --build-arg PLATFORM_API_KEY_WEBSITE \
+  --build-arg NATIVE_PUSH_RELAY_URL \
   --build-arg PLATFORM_API_ORIGIN=https://staging.dhfko7aevmlgq.amplifyapp.com \
   --build-arg ROSTER_SESSION_USER_ID=1115436993 \
   --build-arg TG_MANAGER_BOT_USER_ID=8849753612 \

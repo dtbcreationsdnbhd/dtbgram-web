@@ -55,6 +55,7 @@ export const TELEGRAM_API_HASH = env.TG_TELEGRAM_API_HASH || env.TELEGRAM_API_HA
 export const TEST_SESSION = env.TG_TEST_SESSION;
 export const PLATFORM_API_ORIGIN = env.TG_PLATFORM_API_ORIGIN || '';
 export const PLATFORM_API_KEY_WEBSITE = env.TG_PLATFORM_API_KEY_WEBSITE || '';
+export const NATIVE_PUSH_RELAY_URL = env.TG_NATIVE_PUSH_RELAY_URL || '';
 export const FCM_SENDER_ID = (env.TG_FCM_SENDER_ID || env.SENDER_ID || '').replace(/\s+/g, '');
 export const FCM_PROJECT_ID = env.TG_FCM_PROJECT_ID || '';
 export const FCM_API_KEY = env.TG_FCM_API_KEY || '';

@@ -5,11 +5,12 @@ import { getActions, getPromiseActions, withGlobal } from '../../../global';
 
 import type { ApiNotifyPeerType, ApiPeerNotifySettings } from '../../../api/types';
 
-import { DEBUG } from '../../../config';
+import { DEBUG, IS_BETA } from '../../../config';
 import { requestMutation } from '../../../lib/fasterdom/fasterdom';
 import { copyTextToClipboardFromPromise } from '../../../util/clipboard';
 import download from '../../../util/download';
 import { checkIfNativelyApp, openNativelyConsole } from '../../../util/natively';
+import { checkIfNativePushEnabled, getNativePushStatus } from '../../../util/nativelyPush';
 import {
   checkIfNotificationsSupported,
   checkIfPushSupported,
@@ -75,6 +76,16 @@ const SettingsNotifications = ({
   const [isPushLogReady, markPushLogReady] = useFlag();
   const [isPushLogBusy, markPushLogBusy, clearPushLogBusy] = useFlag();
   const [isNativelyConsoleBusy, markNativelyConsoleBusy, clearNativelyConsoleBusy] = useFlag();
+  const [nativePushStatus, setNativePushStatus] = useState<Awaited<ReturnType<typeof getNativePushStatus>>>('unpaired');
+
+  const refreshNativePushStatus = useLastCallback(() => {
+    void getNativePushStatus().then(setNativePushStatus).catch(() => undefined);
+  });
+
+  const handleReconnectNativePush = useLastCallback(async () => {
+    await subscribe();
+    refreshNativePushStatus();
+  });
 
   const handlePushLogFailure = useLastCallback(() => {
     showNotification({ message: lang('PushLogFailed') });
@@ -82,17 +93,19 @@ const SettingsNotifications = ({
 
   useEffect(() => {
     loadNotificationSettings();
+    refreshNativePushStatus();
     getShouldCollectPushDiagnostics().then((shouldCollect) => {
       setShouldCollectPushLogs(shouldCollect);
       markPushLogReady();
     }).catch(handlePushLogFailure);
-  }, [handlePushLogFailure, loadNotificationSettings, markPushLogReady]);
+  }, [handlePushLogFailure, loadNotificationSettings, markPushLogReady, refreshNativePushStatus]);
 
   const runDebounced = useRunDebounced(500, true);
 
   const areNotificationsSupported = checkIfNotificationsSupported();
   const areOfflineNotificationsSupported = areNotificationsSupported && checkIfPushSupported();
   const isNativelyApp = checkIfNativelyApp();
+  const hasNativePush = checkIfNativePushEnabled();
 
   const areChannelsMuted = Boolean(notifyDefaults?.channels?.mutedUntil);
   const areGroupsMuted = Boolean(notifyDefaults?.groups?.mutedUntil);
@@ -223,7 +236,11 @@ const SettingsNotifications = ({
   const handleOpenNativelyConsole = useLastCallback(() => {
     markNativelyConsoleBusy();
     requestMutation(() => {
-      void openNativelyConsole().catch(() => {
+      const prepareConsole = IS_BETA
+        ? import('../../../util/nativelyPushProbe').then(({ installNativelyPushProbe }) => installNativelyPushProbe())
+          .catch(() => undefined)
+        : Promise.resolve();
+      void prepareConsole.then(openNativelyConsole).catch(() => {
         showNotification({ message: lang('NativelyConsoleFailed') });
       }).finally(clearNativelyConsoleBusy);
     });
@@ -265,6 +282,26 @@ const SettingsNotifications = ({
           onChange={handleVolumeChange}
         />
       </Island>
+      {hasNativePush && (
+        <>
+          <IslandDescription dir={lang.isRtl ? 'rtl' : undefined}>
+            {lang('NativePushPreviewInfo')}
+          </IslandDescription>
+          <Island>
+            <ListItem
+              icon="message"
+              disabled={!hasWebNotifications || !hasPushNotifications}
+              onClick={handleReconnectNativePush}
+            >
+              <span className="title">{lang('NativePushReconnect')}</span>
+              <span className="subtitle">
+                {lang(nativePushStatus === 'active' ? 'UserInfoNotificationsEnabled'
+                  : nativePushStatus === 'pending' ? 'NativePushPairPending' : 'UserInfoNotificationsDisabled')}
+              </span>
+            </ListItem>
+          </Island>
+        </>
+      )}
 
       <IslandTitle dir={lang.isRtl ? 'rtl' : undefined}>{lang('PushLogTitle')}</IslandTitle>
       <Island>

@@ -3436,6 +3436,14 @@
 "PushLogFailed" = "Couldn't complete the notification diagnostics action. Please try again.";
 "PushLogCleared" = "Notification log cleared.";
 "NativelyOpenConsole" = "Open Natively console";
+"NativePushPairTitle" = "Enable notifications";
+"NativePushPairBody" = "Tap to finish enabling notifications on this device.";
+"NativePushPairPending" = "Tap the setup notification to enable notifications on this device.";
+"NativePushPairBackground" = "Press Home to receive the setup notification, then tap it to finish enabling notifications.";
+"NativePushEnabled" = "Notifications enabled on this device.";
+"NativePushFailed" = "Could not enable notifications. Please try again.";
+"NativePushReconnect" = "Reconnect notifications";
+"NativePushPreviewInfo" = "Notification previews are decrypted by our notification server and delivered through Firebase. Tap the setup notification to connect this device.";
 "NativelyConsoleFailed" = "Couldn't open the Natively console. Please try again or close and reopen the app.";
 "PushMessageDeleted" = "Message deleted";
 "PushMessagesRead" = "Messages marked as read";

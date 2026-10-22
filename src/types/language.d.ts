@@ -2578,6 +2578,14 @@ export interface LangPair {
   'PushLogFailed': undefined;
   'PushLogCleared': undefined;
   'NativelyOpenConsole': undefined;
+  'NativePushPairTitle': undefined;
+  'NativePushPairBody': undefined;
+  'NativePushPairPending': undefined;
+  'NativePushPairBackground': undefined;
+  'NativePushEnabled': undefined;
+  'NativePushFailed': undefined;
+  'NativePushReconnect': undefined;
+  'NativePushPreviewInfo': undefined;
   'NativelyConsoleFailed': undefined;
   'PushMessageDeleted': undefined;
   'PushMessagesRead': undefined;

@@ -4,10 +4,17 @@ type NativelySdk = {
   openConsole: NoneToVoidFunction;
 };
 
+type NativelyFirebaseNotifications = {
+  firebase_request_permission: (callback: (response: { status?: unknown }) => void) => void;
+  firebase_has_permission: (callback: (response: { status?: unknown }) => void) => void;
+  firebase_get_token: (callback: (response: { token?: unknown }) => void) => void;
+};
+
 declare global {
   interface Window {
     $agent?: unknown;
     natively?: NativelySdk;
+    NativelyFirebaseNotifications?: new () => NativelyFirebaseNotifications;
   }
 }
 
@@ -34,6 +41,55 @@ export async function openNativelyConsole() {
     throw new Error('Rebuild the Natively app to enable its console');
   }
   sdk.openConsole();
+}
+
+export async function getNativelyPushState() {
+  if (!checkIfNativelyApp()) throw new Error('Native push requires the Natively app');
+  await waitForNativelySdk();
+  const Notifications = window.NativelyFirebaseNotifications;
+  if (!Notifications) throw new Error('Natively Firebase notifications are unavailable');
+  const notifications = new Notifications();
+  const permission = await runNativelyCallback<{ status?: unknown }>((callback) => {
+    notifications.firebase_has_permission(callback);
+  });
+  if (permission.status !== true) return { hasPermission: false, token: undefined };
+
+  const response = await runNativelyCallback<{ token?: unknown }>((callback) => {
+    notifications.firebase_get_token(callback);
+  });
+  return {
+    hasPermission: true,
+    token: typeof response.token === 'string' && response.token ? response.token : undefined,
+  };
+}
+
+export async function requestNativelyPushPermission() {
+  if (!checkIfNativelyApp()) return false;
+  await waitForNativelySdk();
+  const Notifications = window.NativelyFirebaseNotifications;
+  if (!Notifications) throw new Error('Natively Firebase notifications are unavailable');
+  const notifications = new Notifications();
+  const response = await runNativelyCallback<{ status?: unknown }>((callback) => {
+    notifications.firebase_request_permission(callback);
+  });
+  return response.status === true;
+}
+
+function runNativelyCallback<T>(start: (callback: (response: T) => void) => void) {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      reject(new Error('Natively Firebase request timed out'));
+    }, NATIVELY_READY_TIMEOUT_MS);
+    try {
+      start((response) => {
+        window.clearTimeout(timeout);
+        resolve(response);
+      });
+    } catch {
+      window.clearTimeout(timeout);
+      reject(new Error('Natively Firebase request failed'));
+    }
+  });
 }
 
 function waitForNativelySdk() {

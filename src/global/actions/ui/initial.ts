@@ -13,6 +13,7 @@ import {
 import { getCurrentTabId } from '../../../util/establishMultitabRole';
 import generateUniqueId from '../../../util/generateUniqueId';
 import { setTimeFormat as setLocalizedTimeFormat } from '../../../util/localization';
+import { checkIfNativePushEnabled } from '../../../util/nativelyPush';
 import { subscribe, unsubscribe } from '../../../util/notifications';
 import { oldSetLanguage } from '../../../util/oldLangProvider';
 import { decryptSessionByCurrentHash } from '../../../util/passcode';
@@ -118,6 +119,10 @@ addActionHandler('initMain', (global, actions): ActionReturnType => {
   startEmployeeVerifiedRefresh();
 
   const { hasWebNotifications, hasPushNotifications } = selectSettingsKeys(global);
+  if (checkIfNativePushEnabled()) {
+    if (hasWebNotifications && hasPushNotifications) void subscribe();
+    return;
+  }
   if (hasWebNotifications && hasPushNotifications) {
     // Most of the browsers only show the notifications permission prompt after the first user gesture.
     const events = ['click', 'keypress'];

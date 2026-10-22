@@ -11,6 +11,7 @@ import { IS_ANDROID, IS_IOS, IS_SERVICE_WORKER_SUPPORTED } from './browser/windo
 import { formatShareText } from './deeplink';
 import { validateFiles } from './files';
 import { addLocalizationCallback } from './localization';
+import { checkIfNativePushEnabled, consumeNativePushPairing } from './nativelyPush';
 import {
   checkIfOfflinePushFailed, notifyClientReady, playNotifySoundDebounced, refreshPushNotificationContext, subscribe,
 } from './notifications';
@@ -46,11 +47,15 @@ function handlePushContextChange(global: GlobalState) {
     && oldGlobal.settings.byKey.hasWebNotifications === global.settings.byKey.hasWebNotifications
     && oldGlobal.settings.notifyDefaults === global.settings.notifyDefaults
     && oldGlobal.chats.notifyExceptionById === global.chats.notifyExceptionById) {
-    if (oldGlobal.chats.byId !== global.chats.byId) refreshPushChatContextThrottled();
+    if (oldGlobal.chats.byId !== global.chats.byId || (checkIfNativePushEnabled()
+      && (oldGlobal.messages.byChatId !== global.messages.byChatId
+        || oldGlobal.chats.lastMessageIds !== global.chats.lastMessageIds))) refreshPushChatContextThrottled();
     return;
   }
 
   void refreshPushNotificationContext();
+  if (checkIfNativePushEnabled()
+    && (!oldGlobal?.isInited || oldGlobal.currentUserId !== global.currentUserId)) void subscribe();
 }
 
 function handleWorkerMessage(e: MessageEvent) {
@@ -181,9 +186,24 @@ async function registerServiceWorker() {
   }
 }
 
-if (IS_SERVICE_WORKER_SUPPORTED) {
+if (IS_SERVICE_WORKER_SUPPORTED || checkIfNativePushEnabled()) {
   addCallback(handlePushContextChange);
   addLocalizationCallback(refreshPushNotificationContext);
+}
+
+if (checkIfNativePushEnabled()) {
+  window.addEventListener('hashchange', () => {
+    if (consumeNativePushPairing()) void subscribe();
+  });
+  window.addEventListener('focus', () => {
+    void subscribe();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void subscribe();
+  });
+}
+
+if (IS_SERVICE_WORKER_SUPPORTED) {
   if (document.readyState === 'loading') {
     window.addEventListener('load', registerServiceWorker);
   } else {

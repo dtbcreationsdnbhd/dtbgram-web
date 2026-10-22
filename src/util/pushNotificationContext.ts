@@ -13,6 +13,12 @@ const MESSAGE_PUSH_TYPES = [
 type PushControlType = typeof CONTROL_PUSH_TYPES[number];
 type PushMessageType = typeof MESSAGE_PUSH_TYPES[number];
 
+export type PushUnreadSnapshot = {
+  count: number;
+  lastMessageId: number;
+  lastReadInboxMessageId: number;
+};
+
 export type PushNotificationContext = {
   userId?: string;
   isScreenLocked: boolean;
@@ -27,6 +33,7 @@ export type PushNotificationContext = {
   deletedMessageText?: string;
   incomingCallText: string;
   shouldShowPreviewsByChatId: Record<string, boolean>;
+  unreadByChatId?: Record<string, PushUnreadSnapshot>;
 };
 
 const PUSH_NOTIFICATION_CONTEXT_STORE = new IdbStore('tt-push-notification-context');

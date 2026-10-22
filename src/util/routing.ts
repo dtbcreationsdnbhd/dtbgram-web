@@ -2,11 +2,12 @@ import type { MessageListType, ThreadId } from '../types';
 import { MAIN_THREAD_ID } from '../api/types';
 
 import { IS_MOCKED_CLIENT } from '../config';
+import { consumeNativePushPairing } from './nativelyPush';
 
 let parsedInitialLocationHash: Record<string, string> | undefined;
 let messageHash: string | undefined;
 let isAlreadyParsed = false;
-let initialLocationHash = window.location.hash;
+let initialLocationHash = consumeNativePushPairing() ? '' : window.location.hash;
 
 export function resetInitialLocationHash() {
   isAlreadyParsed = false;

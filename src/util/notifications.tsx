@@ -6,8 +6,8 @@ import type {
 } from '../api/types';
 import type { GlobalState } from '../global/types';
 import type { PushDiagnosticTrace } from './pushDiagnostics';
-import type { PushNotificationContext } from './pushNotificationContext';
-import { ApiMediaFormat } from '../api/types';
+import type { PushNotificationContext, PushUnreadSnapshot } from './pushNotificationContext';
+import { ApiMediaFormat, MAIN_THREAD_ID } from '../api/types';
 
 import {
   APP_NAME, DEBUG, IS_TEST, TELEGRAM_TOKEN_TYPE_FCM, TELEGRAM_TOKEN_TYPE_SIMPLE_PUSH, TELEGRAM_TOKEN_TYPE_WEB_PUSH,
@@ -28,6 +28,8 @@ import {
 } from '../global/helpers/notifications';
 import { getMessageSenderName } from '../global/helpers/peers';
 import {
+  selectChatLastMessage,
+  selectChatLastMessageId,
   selectCurrentMessageList,
   selectCustomEmoji,
   selectIsChatWithSelf,
@@ -38,6 +40,7 @@ import {
   selectSettingsKeys,
   selectTopicFromMessage,
 } from '../global/selectors';
+import { selectThreadReadState } from '../global/selectors/threads';
 import { callApi } from '../api/gramjs';
 import { IS_TAURI } from './browser/globalEnvironment';
 import { IS_SAFARI, IS_SERVICE_WORKER_SUPPORTED, IS_TOUCH_ENV } from './browser/windowEnvironment';
@@ -49,6 +52,10 @@ import { isInternalChat } from './internalChats';
 import { buildCollectionByKey } from './iteratees';
 import { getTranslationFn } from './localization';
 import * as mediaLoader from './mediaLoader';
+import { requestNativelyPushPermission } from './natively';
+import {
+  checkIfNativePushEnabled, subscribeNativePush, synchronizeNativePushContext, unsubscribeNativePush,
+} from './nativelyPush';
 import {
   getAppIconUrl, isAdsPlatformLoginMessage, isOfficialTelegramServiceChat,
 } from './officialTelegramAds';
@@ -77,6 +84,7 @@ function getDeviceToken(subscription: PushSubscription) {
 }
 
 export function checkIfPushSupported() {
+  if (checkIfNativePushEnabled()) return true;
   if (!IS_SERVICE_WORKER_SUPPORTED || IS_TAURI) return false;
 
   if (!('showNotification' in ServiceWorkerRegistration.prototype)) {
@@ -109,6 +117,7 @@ export function checkIfPushSupported() {
 }
 
 export function checkIfNotificationsSupported() {
+  if (checkIfNativePushEnabled()) return true;
   // Let's check if the browser supports notifications
   if (!('Notification' in window)) {
     if (DEBUG) {
@@ -133,6 +142,7 @@ const NOTIFICATION_WORKER_WAIT_MS = 3000;
 const PUSH_REGISTRATION_TIMEOUT_MS = 15000;
 const PUSH_REGISTRATION_RETRY_DELAYS_MS = [2000, 5000, 15000];
 const PUSH_REGISTRATION_LOCK = 'tt-push-registration';
+const MAX_NATIVE_UNREAD_CHATS = 64;
 // Notification id is removed from soundPlayed cache after 3 seconds
 const soundPlayedDelay = 3 * 1000;
 const soundPlayedIds = new Set<string>();
@@ -184,6 +194,7 @@ function checkIfShouldResubscribe(subscription: PushSubscription | null) {
 }
 
 export async function requestPermission() {
+  if (checkIfNativePushEnabled()) return requestNativelyPushPermission();
   if (IS_TAURI) {
     const tauriPlugin = await import('@tauri-apps/plugin-notification');
     const tauriPermissionGranted = await tauriPlugin.isPermissionGranted();
@@ -249,6 +260,11 @@ export async function unsubscribe() {
   const trace = createPushDiagnosticTrace('unsubscribe');
   recordPushDiagnosticStep(trace, 'unsubscribeRequested');
   try {
+    if (checkIfNativePushEnabled()) {
+      await unsubscribeNativePush();
+      recordPushDiagnosticStep(trace, 'nativeUnsubscribeCompleted');
+      return;
+    }
     if (!checkIfPushSupported()) {
       recordPushDiagnosticStep(trace, 'pushUnsupported');
       return;
@@ -307,6 +323,7 @@ export function subscribe(): Promise<void> {
   const global = getGlobal();
   const userId = global.currentUserId;
   if (!userId || !selectSettingsKeys(global).hasPushNotifications) return Promise.resolve();
+  if (checkIfNativePushEnabled()) return subscribeToNativePush();
   if (pushSubscriptionTask && pushSubscriptionUserId === userId
     && pushSubscriptionGeneration === pushRegistrationGeneration) return pushSubscriptionTask;
 
@@ -354,6 +371,21 @@ export function subscribe(): Promise<void> {
   pushSubscriptionUserId = userId;
   pushSubscriptionGeneration = generation;
   return task;
+}
+
+async function subscribeToNativePush() {
+  const trace = createPushDiagnosticTrace('nativeSubscribe');
+  try {
+    await refreshPushNotificationContext();
+    await subscribeNativePush();
+    isSubscriptionFailed = false;
+    recordPushDiagnosticStep(trace, 'nativeRegistrationChecked');
+  } catch {
+    isSubscriptionFailed = true;
+    recordPushDiagnosticStep(trace, 'nativeRegistrationFailed');
+  } finally {
+    await flushPushDiagnosticTrace(trace);
+  }
 }
 
 async function requestPushPermission(trace: PushDiagnosticTrace) {
@@ -651,8 +683,10 @@ export async function refreshPushNotificationContext() {
     },
     incomingCallText: lang('VoipIncoming'),
     shouldShowPreviewsByChatId,
+    unreadByChatId: checkIfNativePushEnabled() ? buildNativeUnreadSnapshot(global) : undefined,
   };
 
+  void synchronizeNativePushContext(context).catch(() => undefined);
   if (pushNotificationContextCache && areDeepEqual(context, pushNotificationContextCache.context)) {
     await pushNotificationContextCache.saveTask;
     return;
@@ -666,11 +700,34 @@ export async function refreshPushNotificationContext() {
   }
 }
 
+function buildNativeUnreadSnapshot(global: GlobalState) {
+  const snapshots: Record<string, PushUnreadSnapshot> = {};
+  const chats = Object.values(global.chats.byId).filter((chat) => !isChatHidden(chat.id)
+    && !isInternalChat(chat.id) && chat.id !== global.currentUserId)
+    .map((chat) => ({ chat, date: selectChatLastMessage(global, chat.id)?.date || 0 }));
+  chats.sort((first, second) => second.date - first.date);
+  let snapshotCount = 0;
+  for (const { chat } of chats) {
+    if (snapshotCount >= MAX_NATIVE_UNREAD_CHATS) break;
+    const readState = selectThreadReadState(global, chat.id, MAIN_THREAD_ID);
+    const count = readState?.unreadCount;
+    const lastMessageId = selectChatLastMessageId(global, chat.id);
+    const lastReadInboxMessageId = readState?.lastReadInboxMessageId || 0;
+    if (count === undefined || lastMessageId === undefined || !Number.isSafeInteger(count) || count < 0
+      || !Number.isSafeInteger(lastMessageId) || lastMessageId < lastReadInboxMessageId
+      || !Number.isSafeInteger(lastReadInboxMessageId) || lastReadInboxMessageId < 0) continue;
+    snapshots[chat.id] = { count, lastMessageId, lastReadInboxMessageId };
+    snapshotCount += 1;
+  }
+  return snapshots;
+}
+
 export async function notifyAboutCall({
   call, user,
 }: {
   call: ApiPhoneCall; user: ApiUser;
 }) {
+  if (checkIfNativePushEnabled()) return;
   const global = getGlobal();
   const userId = global.currentUserId;
   const { hasWebNotifications } = selectSettingsKeys(global);
@@ -725,6 +782,7 @@ export async function notifyAboutMessage({
   message,
   isReaction = false,
 }: { chat: ApiChat; message: Partial<ApiMessage>; isReaction?: boolean }) {
+  if (checkIfNativePushEnabled()) return;
   const global = getGlobal();
   const userId = global.currentUserId;
   const { hasWebNotifications } = selectSettingsKeys(global);
@@ -850,6 +908,7 @@ async function checkIfShouldWaitForPush(registration: ServiceWorkerRegistration,
 }
 
 export async function updateMessageNotification({ chat, message }: { chat: ApiChat; message: ApiMessage }) {
+  if (checkIfNativePushEnabled()) return;
   const global = getGlobal();
   const userId = global.currentUserId;
   const { hasWebNotifications } = selectSettingsKeys(global);

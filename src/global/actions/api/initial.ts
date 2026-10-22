@@ -26,6 +26,7 @@ import getSessionLabelClient, { getSessionDeviceModel } from '../../../util/getS
 import {
   ACCOUNT_SLOT, getAccountsInfo, getAccountSlotUrl, getFirstLoggedInAccountSlot,
 } from '../../../util/multiaccount';
+import { checkIfNativePushEnabled, unsubscribeNativePush } from '../../../util/nativelyPush';
 import { unsubscribe } from '../../../util/notifications';
 import { clearEncryptedSession, encryptSession, forgetPasscode } from '../../../util/passcode';
 import {
@@ -310,6 +311,14 @@ addActionHandler('signOut', async (global, actions, payload): Promise<void> => {
   resetPlatformUserSync();
   clearCompanyOtpVerified(global.currentUserId);
   clearCompanyOtpPendingUserId();
+
+  if (checkIfNativePushEnabled()) {
+    try {
+      await unsubscribeNativePush();
+    } catch {
+      // Persisted device credentials allow relay cleanup to retry after a network failure
+    }
+  }
 
   global = getGlobal();
   global = {

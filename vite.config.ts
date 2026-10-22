@@ -91,6 +91,7 @@ export default defineConfig(({ mode }): UserConfig => {
   const telegramApiHash = process.env.TELEGRAM_API_HASH || env.TELEGRAM_API_HASH || '';
   const platformApiOrigin = process.env.PLATFORM_API_ORIGIN || env.PLATFORM_API_ORIGIN || '';
   const platformApiKeyWebsite = process.env.PLATFORM_API_KEY_WEBSITE || env.PLATFORM_API_KEY_WEBSITE || '';
+  const nativePushRelayUrl = process.env.NATIVE_PUSH_RELAY_URL || env.NATIVE_PUSH_RELAY_URL || '';
   const fcmSenderId = (process.env.SENDER_ID || env.SENDER_ID || '').trim();
   const fcmProjectId = (process.env.PROJECT_ID || env.PROJECT_ID || '').trim();
   const fcmApiKey = (process.env.FCM_API_KEY || env.FCM_API_KEY || '').trim();
@@ -215,6 +216,7 @@ export default defineConfig(({ mode }): UserConfig => {
     TG_TEST_SESSION: process.env.TEST_SESSION || env.TEST_SESSION || '',
     TG_PLATFORM_API_ORIGIN: platformApiOrigin,
     TG_PLATFORM_API_KEY_WEBSITE: platformApiKeyWebsite,
+    TG_NATIVE_PUSH_RELAY_URL: nativePushRelayUrl,
     TG_FCM_SENDER_ID: fcmSenderId,
     TG_FCM_PROJECT_ID: fcmProjectId,
     TG_FCM_API_KEY: fcmApiKey,
