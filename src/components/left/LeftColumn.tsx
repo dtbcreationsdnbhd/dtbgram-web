@@ -19,6 +19,7 @@ import {
   IS_APP, IS_FIREFOX, IS_MAC_OS, IS_TOUCH_ENV,
 } from '../../util/browser/windowEnvironment';
 import captureEscKeyListener from '../../util/captureEscKeyListener';
+import { tryParseDeepLink } from '../../util/deepLinkParser';
 import { resolveTransitionName } from '../../util/resolveTransitionName';
 import { captureControlledSwipe } from '../../util/swipeController';
 import { isComposerHasSelection } from '../middle/composer/helpers/selection';
@@ -114,6 +115,7 @@ function LeftColumn({
     loadPasswordInfo,
     clearTwoFaError,
     openChat,
+    openTelegramLink,
     openLeftColumnContent,
     openSettingsScreen,
     openQuickChatPicker,
@@ -382,6 +384,17 @@ function LeftColumn({
   });
 
   const handleSearchQuery = useLastCallback((query: string) => {
+    const trimmedQuery = query.trim();
+    const parsedLink = tryParseDeepLink(trimmedQuery);
+    if (parsedLink?.type === 'publicUsernameOrBotLink') {
+      openTelegramLink({ url: trimmedQuery });
+      if (contentKey === LeftColumnContent.Contacts) {
+        setContactsFilter('');
+      }
+      setGlobalSearchQuery({ query: '' });
+      return;
+    }
+
     if (contentKey === LeftColumnContent.Contacts) {
       setContactsFilter(query);
       return;

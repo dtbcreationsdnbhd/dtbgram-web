@@ -11,7 +11,9 @@ import { getActions, getGlobal, withGlobal } from '../../global';
 import type { ApiChatFolder, ApiLimitTypeWithModal, ApiStarGiftAuctionState, ApiUser } from '../../api/types';
 import type { TabState } from '../../global/types';
 
-import { BASE_EMOJI_KEYWORD_LANG, DEBUG, FOLDERS_POSITION_LEFT, INACTIVE_MARKER } from '../../config';
+import {
+  BASE_EMOJI_KEYWORD_LANG, BASE_URL, DEBUG, FOLDERS_POSITION_LEFT, INACTIVE_MARKER,
+} from '../../config';
 import { requestNextMutation } from '../../lib/fasterdom/fasterdom';
 import {
   selectAreFoldersPresent,
@@ -37,6 +39,7 @@ import { IS_ANDROID, IS_MAC_OS, IS_WAVE_TRANSFORM_SUPPORTED } from '../../util/b
 import buildClassName from '../../util/buildClassName';
 import { waitForTransitionEnd } from '../../util/cssAnimationEndListeners';
 import { processDeepLink } from '../../util/deeplink';
+import { tryParseDeepLink } from '../../util/deepLinkParser';
 import { Bundles, loadBundle } from '../../util/moduleLoader';
 import { parseInitialLocationHash, parseLocationHash } from '../../util/routing';
 import updateIcon from '../../util/updateIcon';
@@ -158,6 +161,26 @@ const CALL_BUNDLE_LOADING_DELAY_MS = 5000; // 5 sec
 const EDITOR_BUNDLE_LOADING_DELAY_MS = 10000; // 10 sec
 
 let DEBUG_isLogged = false;
+let hasConsumedPageDeepLink = false;
+
+function consumePageDeepLink() {
+  if (hasConsumedPageDeepLink) return;
+
+  const currentUrl = window.location.href;
+  if (!tryParseDeepLink(currentUrl)) return;
+
+  hasConsumedPageDeepLink = true;
+  const isProcessed = processDeepLink(currentUrl, { type: 'inner' });
+  if (!isProcessed) {
+    hasConsumedPageDeepLink = false;
+    return;
+  }
+
+  const baseUrl = BASE_URL || `${window.location.origin}/`;
+  const nextUrl = new URL(baseUrl, window.location.origin);
+  nextUrl.hash = window.location.hash;
+  window.history.replaceState(window.history.state, '', nextUrl.href);
+}
 
 const Main = ({
   isMobile,
@@ -437,6 +460,8 @@ const Main = ({
     if (parsedInitialLocationHash?.tgaddr) {
       processDeepLink(decodeURIComponent(parsedInitialLocationHash.tgaddr), { type: 'inner' });
     }
+
+    consumePageDeepLink();
   }, [isSynced]);
 
   useTauriEvent<string>('deeplink', (event) => {

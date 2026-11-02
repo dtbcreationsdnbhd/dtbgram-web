@@ -371,16 +371,35 @@ export const SUPPORTED_TRANSLATION_LANGUAGES = [
 export const RE_LINK_TEMPLATE = '((ftp|https?):\\/\\/)?((www\\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\\.[a-zA-Z][-a-zA-Z0-9]{1,62})\\b([-a-zA-Z0-9()@:%_+.,~#?&/=]*)';
 export const RE_MENTION_TEMPLATE = '(@[\\w\\d_-]+)';
 export const RE_TG_LINK = /^tg:(\/\/)?/i;
-export const RE_TME_LINK = /^(https?:\/\/)?(?:([-a-zA-Z0-9@:%_+~#=]{1,32}\.)?t\.me|telegram\.(?:me|dog))(?=[:/?#]|$)/i;
+// Bot links on these Kingdom Ascend hosts use the same deep-link path as t.me
+const APP_LINK_HOSTS = ['monoverse.biz', 'kingdomasc.website'];
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const TELEGRAM_LINK_HOST_SOURCE = String.raw`(?:[-a-zA-Z0-9@:%_+~#=]{1,32}\.)?t\.me|telegram\.(?:me|dog)`;
+const APP_LINK_HOST_SOURCE = APP_LINK_HOSTS.map(escapeRegExp).join('|');
+export const RE_TME_LINK = new RegExp(
+  `^(https?:\\/\\/)?(?:${TELEGRAM_LINK_HOST_SOURCE}|${APP_LINK_HOST_SOURCE})(?=[:/?#]|$)`,
+  'i',
+);
 export const RE_TELEGRAM_LINK = /^(https?:\/\/)?telegram\.org\//i;
 export const TME_LINK_PREFIX = 'https://t.me/';
+export const DEEP_LINK_HOSTS = new Set([
+  't.me',
+  'telegram.me',
+  'telegram.dog',
+  ...APP_LINK_HOSTS,
+]);
 export const BOT_FATHER_USERNAME = 'botfather';
 export const USERNAME_PURCHASE_ERROR = 'USERNAME_PURCHASE_AVAILABLE';
 export const MESSAGE_ID_REQUIRED_ERROR = 'MESSAGE_ID_REQUIRED';
 export const PURCHASE_USERNAME = 'auction';
 export const ACCEPTABLE_USERNAME_ERRORS = new Set([USERNAME_PURCHASE_ERROR, 'USERNAME_INVALID']);
 export const TME_WEB_DOMAINS = new Set([
-  't.me', 'telegram.me', 'telegram.dog', 'web.t.me', 'a.t.me', 'k.t.me', 'z.t.me',
+  ...DEEP_LINK_HOSTS,
+  'web.t.me', 'a.t.me', 'k.t.me', 'z.t.me',
 ]);
 export const WEB_APP_PLATFORM = 'weba';
 export const LANG_PACK = 'weba';
