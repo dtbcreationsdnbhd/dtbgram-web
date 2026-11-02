@@ -1,6 +1,6 @@
 import type { ThreadId } from '../types';
 
-import { RE_TG_LINK, RE_TME_LINK } from '../config';
+import { DEEP_LINK_HOSTS, RE_TG_LINK, RE_TME_LINK } from '../config';
 import { IS_BAD_URL_PARSER } from './browser/globalEnvironment';
 import { ensureProtocol } from './browser/url';
 import { parseTimestampDuration } from './dates/timestamp';
@@ -169,7 +169,7 @@ type OAuthLinkBuilderParams = Omit<BuilderParams<OAuthLink>, 'url'> & {
   url: string;
 };
 
-const ELIGIBLE_HOSTNAMES = new Set(['t.me', 'telegram.me', 'telegram.dog']);
+const ELIGIBLE_HOSTNAMES = DEEP_LINK_HOSTS;
 const MAX_BOT_START_PARAMETER_LENGTH = 64;
 
 export function isDeepLink(link: string): boolean {
